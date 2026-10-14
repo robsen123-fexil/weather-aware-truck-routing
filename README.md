@@ -64,7 +64,17 @@ Do not commit `.env` files. Use `.env.example` as a template.
 
 ## Deploy
 
-- **API (Render):** Blueprint [`render.yaml`](render.yaml) — root dir `weather-routing-backend`, gunicorn + collectstatic. Set `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `OPENROUTESERVICE_API_KEY` in the Render dashboard.
-- **UI (Vercel):** Root Directory `weather-routing-frontend`, env `VITE_API_BASE_URL` = your Render HTTPS URL. See [`weather-routing-frontend/README.md`](weather-routing-frontend/README.md).
+### Live URLs
 
-Deploy the API first, then the UI, then set `CORS_ALLOWED_ORIGINS` to the Vercel origin if it is not already covered by the `*.vercel.app` regex.
+| App | URL |
+|-----|-----|
+| Frontend (Vercel) | https://weather-routing-frontend.vercel.app |
+| API (Render) | https://weather-aware-truck-routing-api-8jzc.onrender.com |
+
+### Hosting setup
+
+- **API (Render):** Service `weather-aware-truck-routing-api` — root dir `weather-routing-backend`, gunicorn + collectstatic. Blueprint: [`render.yaml`](render.yaml). Dashboard: https://dashboard.render.com/web/srv-db7uhbmi0phs73crc0q0  
+  Required env: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=.onrender.com`, `OPENROUTESERVICE_API_KEY`, and optionally `CORS_ALLOWED_ORIGINS=https://weather-routing-frontend.vercel.app` (also covered by the `*.vercel.app` CORS regex).
+- **UI (Vercel):** Project root `weather-routing-frontend`, env `VITE_API_BASE_URL=https://weather-aware-truck-routing-api-8jzc.onrender.com`. See [`weather-routing-frontend/README.md`](weather-routing-frontend/README.md).
+
+If a Render deploy is stuck (platform 503), open the service dashboard → **Manual Deploy** → **Deploy latest commit**. After the first successful deploy, install the [Render GitHub App](https://github.com/apps/render) on this private repo so auto-deploys keep working.
