@@ -55,7 +55,7 @@ class WeatherForecastQuerySerializer(serializers.Serializer):
     lon = serializers.FloatField(min_value=-180, max_value=180, required=False)
     start = serializers.DateTimeField(required=False)
     hours = serializers.IntegerField(required=False, min_value=0, max_value=48, default=48)
-    step_hours = serializers.IntegerField(required=False, min_value=1, max_value=6, default=1)
+    step_hours = serializers.IntegerField(required=False, min_value=1, max_value=6, default=3)
     points = serializers.ListField(
         child=serializers.DictField(),
         required=False,

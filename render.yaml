@@ -9,7 +9,7 @@ services:
     plan: free
     rootDir: weather-routing-backend
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
-    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --graceful-timeout 30
     healthCheckPath: /api/health/
     envVars:
       - key: PYTHON_VERSION
