@@ -1,0 +1,30 @@
+# Secrets & local env
+.env
+.env.local
+.env.*.local
+**/.env
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/*.sqlite3
+**/db.sqlite3
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Node
+**/node_modules/
+**/dist/
+**/dist-ssr/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Local artifacts
+last_analyze.json
+**/_req.json
