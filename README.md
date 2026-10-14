@@ -53,8 +53,18 @@ npm run dev
 
 | Variable | Where | Purpose |
 |----------|-------|---------|
-| `OPENROUTESERVICE_API_KEY` | backend `.env` | Routing / geocoding (required for ORS) |
-| `VITE_API_BASE_URL` | frontend `.env` | Defaults to `http://127.0.0.1:8000` |
-| `CORS_ALLOWED_ORIGINS` | backend `.env` | Include `http://localhost:5173` |
+| `OPENROUTESERVICE_API_KEY` | backend `.env` / Render | Routing / geocoding (required for ORS) |
+| `VITE_API_BASE_URL` | frontend `.env` / Vercel | API origin (local: `http://127.0.0.1:8000`) |
+| `CORS_ALLOWED_ORIGINS` | backend `.env` / Render | Frontend origin(s), e.g. Vercel URL |
+| `DJANGO_SECRET_KEY` | Render | Required in production |
+| `DJANGO_DEBUG` | Render | Set `False` in production |
+| `DJANGO_ALLOWED_HOSTS` | Render | e.g. `your-service.onrender.com` |
 
 Do not commit `.env` files. Use `.env.example` as a template.
+
+## Deploy
+
+- **API (Render):** Blueprint [`render.yaml`](render.yaml) — root dir `weather-routing-backend`, gunicorn + collectstatic. Set `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `OPENROUTESERVICE_API_KEY` in the Render dashboard.
+- **UI (Vercel):** Root Directory `weather-routing-frontend`, env `VITE_API_BASE_URL` = your Render HTTPS URL. See [`weather-routing-frontend/README.md`](weather-routing-frontend/README.md).
+
+Deploy the API first, then the UI, then set `CORS_ALLOWED_ORIGINS` to the Vercel origin if it is not already covered by the `*.vercel.app` regex.

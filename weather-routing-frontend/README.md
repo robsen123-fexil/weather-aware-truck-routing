@@ -56,6 +56,23 @@ Open **http://127.0.0.1:5173**
 npm run build
 ```
 
+Output directory: `dist`
+
+## Deploy (Vercel)
+
+1. Import the GitHub repo in Vercel.
+2. Set **Root Directory** to `weather-routing-frontend`.
+3. Framework preset: Vite (Build: `npm run build`, Output: `dist`).
+4. Add environment variable (Production + Preview):
+
+```env
+VITE_API_BASE_URL=https://your-render-service.onrender.com
+```
+
+Use the public Render API URL (no trailing slash). Redeploy after changing env vars so Vite bakes the value into the build.
+
+`vercel.json` rewrites unknown paths to `index.html` for SPA routing.
+
 ## Integrated endpoints
 
 | UI action | API |

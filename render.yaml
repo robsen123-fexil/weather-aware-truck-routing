@@ -1,0 +1,28 @@
+# Render Blueprint — Web Service for the Django API
+# Dashboard: New → Blueprint → connect this repo
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: weather-aware-truck-routing-api
+    runtime: python
+    plan: free
+    rootDir: weather-routing-backend
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    healthCheckPath: /api/health/
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECURE_SSL_REDIRECT
+        value: "True"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: OPENROUTESERVICE_API_KEY
+        sync: false
