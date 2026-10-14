@@ -40,16 +40,20 @@ def rank_routes(routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def select_recommendation(ranked_routes: list[dict[str, Any]]) -> dict[str, Any] | None:
     """
-    Recommend the top-ranked route that has no No-Travel segments and at least
-    some evaluated forecast coverage. Routes with 0% coverage are not presented
-    as safe recommendations.
+    Recommend the top-ranked route that has no No-Travel segments.
+
+    Prefer routes with some forecast coverage. If every candidate lacks weather
+    data (provider outage / rate limit), still recommend the top non-No-Travel
+    route with low confidence rather than leaving the UI with no pick.
     """
+    fallback: dict[str, Any] | None = None
     for route in ranked_routes:
         summary = route.get("risk_summary") or {}
         if summary.get("has_no_travel"):
             continue
+        if fallback is None:
+            fallback = route
         coverage = summary.get("forecast_coverage") or {}
-        if float(coverage.get("coverage_percent") or 0) <= 0:
-            continue
-        return route
-    return None
+        if float(coverage.get("coverage_percent") or 0) > 0:
+            return route
+    return fallback

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -17,7 +18,12 @@ from weather.forecast import normalize_open_meteo_hour, weather_to_dict
 logger = logging.getLogger(__name__)
 
 # Keep corridor HTTP volume low on the free Open-Meteo endpoint.
-_MAX_CORRIDOR_POINTS = 12
+_MAX_CORRIDOR_POINTS = 8
+
+# Process-wide cache so analyze + corridor on the same worker share fetches.
+_FORECAST_CACHE: dict[str, dict[str, Any]] = {}
+_FORECAST_CACHE_LOCK = threading.Lock()
+_FORECAST_CACHE_MAX = 256
 
 
 class WeatherService:
@@ -28,10 +34,21 @@ class WeatherService:
             "https://api.open-meteo.com/v1",
         ).rstrip("/")
         self.timeout = getattr(settings, "HTTP_TIMEOUT_SECONDS", 30)
-        self._cache: dict[str, dict[str, Any]] = {}
 
     def _cache_key(self, lat: float, lon: float, start: str, end: str) -> str:
         return f"{round(lat, 3)}:{round(lon, 3)}:{start}:{end}"
+
+    def _cache_get(self, key: str) -> dict[str, Any] | None:
+        with _FORECAST_CACHE_LOCK:
+            hit = _FORECAST_CACHE.get(key)
+            return dict(hit) if hit is not None else None
+
+    def _cache_set(self, key: str, data: dict[str, Any]) -> None:
+        with _FORECAST_CACHE_LOCK:
+            if len(_FORECAST_CACHE) >= _FORECAST_CACHE_MAX:
+                # Drop an arbitrary old entry (FIFO-ish via insert order on 3.7+).
+                _FORECAST_CACHE.pop(next(iter(_FORECAST_CACHE)), None)
+            _FORECAST_CACHE[key] = data
 
     def _get_json(self, params: dict[str, Any], *, retries: int = 2) -> dict[str, Any] | list[Any]:
         url = f"{self.base_url}/forecast"
@@ -80,10 +97,13 @@ class WeatherService:
         if around.tzinfo is None:
             around = around.replace(tzinfo=timezone.utc)
 
+        # Dated windows are optional; default stable forecast_days cache is preferred
+        # so analyze + corridor share one HTTP call per location.
         if start_day is not None and end_day is not None:
             key = self._cache_key(lat, lon, start_day, end_day)
-            if key in self._cache:
-                return self._cache[key]
+            cached = self._cache_get(key)
+            if cached is not None:
+                return cached
             params = {
                 "latitude": lat,
                 "longitude": lon,
@@ -104,15 +124,16 @@ class WeatherService:
             if isinstance(data, list):
                 data = data[0] if data else {}
             assert isinstance(data, dict)
-            self._cache[key] = data
+            self._cache_set(key, data)
             return data
 
         return self._fetch_forecast_days(lat, lon)
 
     def _fetch_forecast_days(self, lat: float, lon: float) -> dict[str, Any]:
         key = self._cache_key(lat, lon, "fd7", "fd7")
-        if key in self._cache:
-            return self._cache[key]
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -127,9 +148,9 @@ class WeatherService:
         if isinstance(data, list):
             data = data[0] if data else {}
         assert isinstance(data, dict)
-        self._cache[key] = data
+        self._cache_set(key, data)
         # Tiny pause after a real network fetch to stay under free-tier bursts.
-        time.sleep(0.08)
+        time.sleep(0.05)
         return data
 
     def weather_at(
@@ -219,27 +240,15 @@ class WeatherService:
         step = max(1, step_hours)
         points = self._subsample_points(points)
 
-        # Single date window for the whole corridor so every hour hits the same cache key.
-        start_day = (start - timedelta(days=1)).date().isoformat()
-        end_day = (start + timedelta(hours=hours) + timedelta(days=1)).date().isoformat()
-
-        # Prefetch each unique coordinate once before building frames.
+        # Prefetch once per point via stable forecast_days cache (no dated window).
         for pt in points:
             lat = float(pt["lat"])
             lon = float(pt["lon"])
             try:
-                self.fetch_hourly_forecast(
-                    lat,
-                    lon,
-                    around=start,
-                    start_day=start_day,
-                    end_day=end_day,
-                )
+                self.fetch_hourly_forecast(lat, lon, around=start)
             except WeatherProviderError:
                 # weather_at will surface unavailable cells for this point.
                 pass
-            # Gentle pacing for free-tier Open-Meteo.
-            time.sleep(0.05)
 
         frames: list[dict[str, Any]] = []
         for h in range(0, hours + 1, step):
@@ -248,13 +257,7 @@ class WeatherService:
             for pt in points:
                 lat = float(pt["lat"])
                 lon = float(pt["lon"])
-                wx = self.weather_at(
-                    lat,
-                    lon,
-                    when,
-                    start_day=start_day,
-                    end_day=end_day,
-                )
+                wx = self.weather_at(lat, lon, when)
                 samples.append(
                     {
                         "lat": lat,

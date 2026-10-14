@@ -42,13 +42,22 @@ async function loadCorridorForecast(
 
   if (seed.length === 0) return null
 
-  const points = subsamplePoints(seed, 12)
-  return postCorridorForecast({
-    points,
-    start: result.request.departure,
-    hours: 48,
-    step_hours: 3,
-  }, { signal })
+  const points = subsamplePoints(seed, 8)
+  const attempt = () =>
+    postCorridorForecast({
+      points,
+      start: result.request.departure,
+      hours: 48,
+      step_hours: 3,
+    }, { signal })
+
+  try {
+    return await attempt()
+  } catch (err) {
+    if (signal.aborted) throw err
+    // One retry — free-tier weather / cold starts can flake once.
+    return attempt()
+  }
 }
 
 export function useRouteAnalysis() {

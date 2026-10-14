@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from typing import Any
 
@@ -264,23 +265,42 @@ class RoutingService:
     @staticmethod
     def _approx_distance_m(origin: dict[str, Any], destination: dict[str, Any]) -> float:
         """Haversine approximate distance — used to avoid ORS alternative-route limits."""
-        from math import asin, cos, radians, sin, sqrt
-
         lat1, lon1 = float(origin["lat"]), float(origin["lon"])
         lat2, lon2 = float(destination["lat"]), float(destination["lon"])
-        rlat1, rlon1, rlat2, rlon2 = map(radians, (lat1, lon1, lat2, lon2))
+        rlat1, rlon1, rlat2, rlon2 = map(math.radians, (lat1, lon1, lat2, lon2))
         dlat, dlon = rlat2 - rlat1, rlon2 - rlon1
-        a = sin(dlat / 2) ** 2 + cos(rlat1) * cos(rlat2) * sin(dlon / 2) ** 2
-        return 2 * 6_371_000 * asin(sqrt(a))
+        a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+        return 2 * 6_371_000 * math.asin(math.sqrt(a))
 
     @staticmethod
-    def _routes_are_similar(a: dict[str, Any], b: dict[str, Any], *, threshold: float = 0.02) -> bool:
-        """True when two routes have nearly the same length (likely duplicates)."""
+    def _midpoint(route: dict[str, Any]) -> tuple[float, float] | None:
+        coords = (route.get("geometry") or {}).get("coordinates") or []
+        if not coords:
+            return None
+        mid = coords[len(coords) // 2]
+        return float(mid[0]), float(mid[1])
+
+    @classmethod
+    def _routes_are_similar(cls, a: dict[str, Any], b: dict[str, Any]) -> bool:
+        """
+        True when two routes are near-duplicates.
+
+        Uses distance AND geometry midpoint so equal-length but geographically
+        different alternatives are kept.
+        """
         da = float(a.get("distance_m") or 0.0)
         db = float(b.get("distance_m") or 0.0)
         if da <= 0 or db <= 0:
             return False
-        return abs(da - db) / max(da, db) < threshold
+        length_close = abs(da - db) / max(da, db) < 0.04
+
+        ma, mb = cls._midpoint(a), cls._midpoint(b)
+        if not ma or not mb:
+            return length_close
+
+        # ~1.5 km midpoint separation at equator ≈ 0.015 deg
+        mid_close = abs(ma[0] - mb[0]) < 0.015 and abs(ma[1] - mb[1]) < 0.015
+        return length_close and mid_close
 
     def _merge_distinct_routes(
         self,
@@ -296,9 +316,40 @@ class RoutingService:
                 if any(self._routes_are_similar(route, existing) for existing in merged):
                     continue
                 merged.append(route)
+            if len(merged) >= max_alternatives:
+                break
         for idx, route in enumerate(merged):
             route["alternative_index"] = idx
         return merged
+
+    @staticmethod
+    def _offset_via(
+        origin: dict[str, Any],
+        destination: dict[str, Any],
+        *,
+        side: float,
+        along: float = 0.5,
+    ) -> dict[str, float]:
+        """
+        Build a via point offset from the OD chord to force an alternate path.
+
+        side: +1 / -1 for left/right of travel direction (degrees-ish scaled by trip length).
+        """
+        lat1, lon1 = float(origin["lat"]), float(origin["lon"])
+        lat2, lon2 = float(destination["lat"]), float(destination["lon"])
+        mid_lat = lat1 + (lat2 - lat1) * along
+        mid_lon = lon1 + (lon2 - lon1) * along
+        # Perpendicular unit vector in lon/lat space (approx).
+        dlat, dlon = lat2 - lat1, lon2 - lon1
+        length = math.hypot(dlat, dlon) or 1.0
+        # Offset ~8–12% of chord length, clamped.
+        offset = min(0.08, max(0.015, length * 0.12)) * side
+        plat = -dlon / length
+        plon = dlat / length
+        return {
+            "lat": mid_lat + plat * offset,
+            "lon": mid_lon + plon * offset,
+        }
 
     def fetch_routes(
         self,
@@ -310,10 +361,11 @@ class RoutingService:
         """
         Request up to three genuinely distinct route alternatives.
 
-        Strategy:
-        - Combine OSRM (long-distance alternatives) and ORS (short-trip alternatives).
-        - Never duplicate near-identical geometry summaries to fill the UI.
-        - Fall back to a single primary route when providers return fewer options.
+        Strategy (stop early once we have enough distinct geometries):
+        1. OSRM with numeric alternatives
+        2. ORS alternative_routes (short trips only)
+        3. ORS preferences: recommended / fastest / shortest × profiles
+        4. OSRM/ORS via-point detours to force remaining distinct paths
         """
         approx_m = self._approx_distance_m(origin, destination)
         # ORS public alternative-routes limit is 100_000 m.
@@ -321,7 +373,10 @@ class RoutingService:
         last_error: Exception | None = None
         batches: list[list[dict[str, Any]]] = []
 
-        body: dict[str, Any] = {
+        def merged_count() -> int:
+            return len(self._merge_distinct_routes(batches, max_alternatives=max_alternatives))
+
+        body_base: dict[str, Any] = {
             "coordinates": [
                 [origin["lon"], origin["lat"]],
                 [destination["lon"], destination["lat"]],
@@ -349,14 +404,14 @@ class RoutingService:
                 logger.warning("OSRM routing failed: %s", exc.message)
 
         # 2) ORS with alternative_routes (up to 2 alts → 3 routes on short trips)
-        if ors_alts_ok:
+        if ors_alts_ok and merged_count() < max_alternatives:
             alt_count = max(0, max_alternatives - 1)
             body_with_alts = {
-                **body,
+                **body_base,
                 "alternative_routes": {
                     "target_count": min(alt_count, 2),
-                    "share_factor": 0.55,
-                    "weight_factor": 1.5,
+                    "share_factor": 0.4,
+                    "weight_factor": 1.8,
                 },
             }
             for profile in profiles:
@@ -373,36 +428,68 @@ class RoutingService:
                         exc.message,
                     )
 
+        # 3) ORS preference variants (often yields different geometries)
+        if merged_count() < max_alternatives:
+            for preference in ("recommended", "fastest", "shortest"):
+                if merged_count() >= max_alternatives:
+                    break
+                for profile in profiles:
+                    if merged_count() >= max_alternatives:
+                        break
+                    body = {**body_base, "preference": preference}
+                    try:
+                        routes = self._directions(profile, body)
+                        if routes:
+                            batches.append(routes)
+                    except RoutingError as exc:
+                        last_error = exc
+                        logger.warning(
+                            "ORS preference=%s profile=%s failed: %s",
+                            preference,
+                            profile,
+                            exc.message,
+                        )
+
+        # 4) Via-point detours to force remaining alternatives
+        if merged_count() < max_alternatives:
+            for side in (1.0, -1.0, 1.4, -1.4):
+                if merged_count() >= max_alternatives:
+                    break
+                via = self._offset_via(origin, destination, side=side)
+                try:
+                    detour = self._directions_osrm_via(
+                        origin, via, destination, max_alternatives=1
+                    )
+                    if detour:
+                        batches.append(detour)
+                        continue
+                except RoutingError as exc:
+                    last_error = exc
+                for profile in profiles[:1]:
+                    try:
+                        body = {
+                            **body_base,
+                            "coordinates": [
+                                [origin["lon"], origin["lat"]],
+                                [via["lon"], via["lat"]],
+                                [destination["lon"], destination["lat"]],
+                            ],
+                        }
+                        routes = self._directions(profile, body)
+                        if routes:
+                            batches.append(routes)
+                            break
+                    except RoutingError as exc:
+                        last_error = exc
+                        logger.warning("ORS via-detour failed: %s", exc.message)
+
         merged = self._merge_distinct_routes(batches, max_alternatives=max_alternatives)
-        if len(merged) >= max_alternatives:
-            logger.info("Returning %s merged route(s) from providers", len(merged))
-            return merged[:max_alternatives]
-
-        # 3) ORS primary only — merge with anything we already have
-        for profile in profiles:
-            try:
-                primary = self._directions(profile, body)
-                if primary:
-                    batches.append(primary)
-                    merged = self._merge_distinct_routes(batches, max_alternatives=max_alternatives)
-                    if merged:
-                        return merged[:max_alternatives]
-            except RoutingError as exc:
-                last_error = exc
-                logger.warning("ORS primary with profile %s failed: %s", profile, exc.message)
-
-        # 4) Last-resort OSRM if nothing usable yet
-        if not merged:
-            try:
-                osrm = self._directions_osrm(
-                    origin, destination, max_alternatives=max_alternatives
-                )
-                if osrm:
-                    return osrm[:max_alternatives]
-            except RoutingError as exc:
-                last_error = exc
-
         if merged:
+            logger.info(
+                "Returning %s distinct route(s) from %s provider batch(es)",
+                len(merged),
+                len(batches),
+            )
             return merged[:max_alternatives]
 
         raise RoutingError(
@@ -416,16 +503,18 @@ class RoutingService:
         *,
         max_alternatives: int = 3,
     ) -> list[dict[str, Any]]:
-        """OSRM public demo server — used when ORS is down."""
+        """OSRM public demo server — used when ORS is down or for alternatives."""
         coords = f"{origin['lon']},{origin['lat']};{destination['lon']},{destination['lat']}"
         url = f"https://router.project-osrm.org/route/v1/driving/{coords}"
+        # Numeric alternatives asks OSRM for up to N-1 extra routes (total ≈ N).
+        alt_param: str | int = max(0, max_alternatives - 1) if max_alternatives > 1 else "false"
         try:
             response = requests.get(
                 url,
                 params={
                     "overview": "full",
                     "geometries": "geojson",
-                    "alternatives": "true" if max_alternatives > 1 else "false",
+                    "alternatives": alt_param,
                 },
                 timeout=self.timeout,
             )
@@ -442,6 +531,53 @@ class RoutingService:
         if payload.get("code") != "Ok":
             raise RoutingError(f"OSRM routing failed: {payload.get('code')}")
 
+        return self._parse_osrm_routes(payload, max_alternatives=max_alternatives)
+
+    def _directions_osrm_via(
+        self,
+        origin: dict[str, Any],
+        via: dict[str, float],
+        destination: dict[str, Any],
+        *,
+        max_alternatives: int = 1,
+    ) -> list[dict[str, Any]]:
+        coords = (
+            f"{origin['lon']},{origin['lat']};"
+            f"{via['lon']},{via['lat']};"
+            f"{destination['lon']},{destination['lat']}"
+        )
+        url = f"https://router.project-osrm.org/route/v1/driving/{coords}"
+        try:
+            response = requests.get(
+                url,
+                params={
+                    "overview": "full",
+                    "geometries": "geojson",
+                    "alternatives": "false",
+                },
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise RoutingError(f"OSRM via routing request failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise RoutingError(
+                f"OSRM via routing API error ({response.status_code}): {response.text[:300]}",
+                status=502,
+            )
+
+        payload = response.json()
+        if payload.get("code") != "Ok":
+            raise RoutingError(f"OSRM via routing failed: {payload.get('code')}")
+
+        return self._parse_osrm_routes(payload, max_alternatives=max_alternatives)
+
+    def _parse_osrm_routes(
+        self,
+        payload: dict[str, Any],
+        *,
+        max_alternatives: int,
+    ) -> list[dict[str, Any]]:
         routes: list[dict[str, Any]] = []
         for idx, route in enumerate((payload.get("routes") or [])[:max_alternatives]):
             geometry = route.get("geometry") or {}

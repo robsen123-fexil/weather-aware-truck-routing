@@ -50,7 +50,9 @@ def build_recommendation_summary(
     coverage_pct = float(coverage.get("coverage_percent") or 0)
     incomplete = bool(rs.get("has_incomplete_forecast"))
 
-    if coverage_pct >= 99 and not incomplete:
+    if coverage_pct <= 0:
+        confidence = "low"
+    elif coverage_pct >= 99 and not incomplete:
         confidence = "high"
     elif coverage_pct >= 50:
         confidence = "partial"
@@ -66,7 +68,12 @@ def build_recommendation_summary(
         f"({coverage.get('checkpoints_with_forecast', 0)}/"
         f"{coverage.get('checkpoints_total', 0)} checkpoints)."
     )
-    if incomplete:
+    if coverage_pct <= 0:
+        reason += (
+            " Weather forecasts were unavailable for checkpoints on this run; "
+            "ranking used travel time and known risk fields only."
+        )
+    elif incomplete:
         reason += (
             " Some checkpoints lack forecasts and are marked Unavailable "
             "(not counted as Low risk)."
