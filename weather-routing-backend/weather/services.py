@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -19,13 +18,23 @@ from weather.forecast import normalize_open_meteo_hour, weather_to_dict
 logger = logging.getLogger(__name__)
 
 # Keep corridor HTTP volume low on the free Open-Meteo endpoint.
-_MAX_CORRIDOR_POINTS = 8
-_PREFETCH_WORKERS = 6
-
+_MAX_CORRIDOR_POINTS = 6
+# ~5.5 km cells — short urban trips share one forecast instead of N near-duplicate calls.
+_GRID_DEG = 0.05
+_BATCH_SIZE = 4
 # Process-wide cache so analyze + corridor on the same worker share fetches.
 _FORECAST_CACHE: dict[str, dict[str, Any]] = {}
 _FORECAST_CACHE_LOCK = threading.Lock()
-_FORECAST_CACHE_MAX = 256
+_FORECAST_CACHE_MAX = 512
+# Serialize outbound Open-Meteo calls so free-tier burst limits are not tripped.
+_HTTP_LOCK = threading.Lock()
+_LAST_HTTP_AT = 0.0
+_MIN_HTTP_GAP_S = 0.35
+
+
+def _grid_coord(value: float) -> float:
+    step = _GRID_DEG
+    return round(round(float(value) / step) * step, 4)
 
 
 class WeatherService:
@@ -38,7 +47,7 @@ class WeatherService:
         self.timeout = getattr(settings, "HTTP_TIMEOUT_SECONDS", 30)
 
     def _cache_key(self, lat: float, lon: float, start: str, end: str) -> str:
-        return f"{round(lat, 3)}:{round(lon, 3)}:{start}:{end}"
+        return f"{_grid_coord(lat)}:{_grid_coord(lon)}:{start}:{end}"
 
     def _cache_get(self, key: str) -> dict[str, Any] | None:
         with _FORECAST_CACHE_LOCK:
@@ -48,26 +57,36 @@ class WeatherService:
     def _cache_set(self, key: str, data: dict[str, Any]) -> None:
         with _FORECAST_CACHE_LOCK:
             if len(_FORECAST_CACHE) >= _FORECAST_CACHE_MAX:
-                # Drop an arbitrary old entry (FIFO-ish via insert order on 3.7+).
                 _FORECAST_CACHE.pop(next(iter(_FORECAST_CACHE)), None)
             _FORECAST_CACHE[key] = data
 
-    def _get_json(self, params: dict[str, Any], *, retries: int = 2) -> dict[str, Any] | list[Any]:
+    def _throttle(self) -> None:
+        global _LAST_HTTP_AT
+        with _HTTP_LOCK:
+            now = time.monotonic()
+            wait = _MIN_HTTP_GAP_S - (now - _LAST_HTTP_AT)
+            if wait > 0:
+                time.sleep(wait)
+            _LAST_HTTP_AT = time.monotonic()
+
+    def _get_json(self, params: dict[str, Any], *, retries: int = 4) -> dict[str, Any] | list[Any]:
         url = f"{self.base_url}/forecast"
         last_exc: Exception | None = None
         for attempt in range(retries + 1):
+            self._throttle()
             try:
                 response = requests.get(url, params=params, timeout=self.timeout)
             except requests.RequestException as exc:
                 last_exc = exc
                 if attempt < retries:
-                    time.sleep(0.4 * (attempt + 1))
+                    time.sleep(0.6 * (attempt + 1))
                     continue
                 raise WeatherProviderError(f"Weather request failed: {exc}") from exc
 
             if response.status_code == 429:
                 if attempt < retries:
-                    time.sleep(1.5 * (attempt + 1))
+                    # Free Open-Meteo needs longer cool-downs under burst load.
+                    time.sleep(2.5 * (attempt + 1))
                     continue
                 raise WeatherProviderError("Weather API rate limit exceeded.", status=429)
             if response.status_code >= 400:
@@ -78,6 +97,16 @@ class WeatherService:
             return response.json()
 
         raise WeatherProviderError(f"Weather request failed: {last_exc}")
+
+    def _base_params(self) -> dict[str, Any]:
+        return {
+            "hourly": "wind_speed_10m,precipitation,rain,snowfall",
+            "wind_speed_unit": "mph",
+            "precipitation_unit": "inch",
+            "timezone": "UTC",
+            "forecast_days": 7,
+            "past_days": 1,
+        }
 
     def fetch_hourly_forecast(
         self,
@@ -92,42 +121,19 @@ class WeatherService:
         Fetch hourly forecast covering the trip timeline.
 
         Default path uses a stable forecast_days window so one HTTP call per
-        location serves all checkpoint ETAs and corridor hours (critical on
-        free Open-Meteo rate limits). Explicit start_day/end_day still supported.
+        grid cell serves all checkpoint ETAs and corridor hours.
         """
         around = around or datetime.now(timezone.utc)
         if around.tzinfo is None:
             around = around.replace(tzinfo=timezone.utc)
 
-        # Dated windows are optional; default stable forecast_days cache is preferred
-        # so analyze + corridor share one HTTP call per location.
         if start_day is not None and end_day is not None:
             key = self._cache_key(lat, lon, start_day, end_day)
             cached = self._cache_get(key)
             if cached is not None:
                 return cached
-            params = {
-                "latitude": lat,
-                "longitude": lon,
-                "hourly": "wind_speed_10m,precipitation,rain,snowfall",
-                "wind_speed_unit": "mph",
-                "precipitation_unit": "inch",
-                "timezone": "UTC",
-                "start_date": start_day,
-                "end_date": end_day,
-            }
-            try:
-                data = self._get_json(params)
-            except WeatherProviderError as exc:
-                if getattr(exc, "status", None) == 429:
-                    raise
-                logger.warning("Dated forecast failed (%s); falling back to forecast_days", exc)
-                return self._fetch_forecast_days(lat, lon)
-            if isinstance(data, list):
-                data = data[0] if data else {}
-            assert isinstance(data, dict)
-            self._cache_set(key, data)
-            return data
+            # Prefer the shared forecast_days cache to cut request volume.
+            return self._fetch_forecast_days(lat, lon)
 
         return self._fetch_forecast_days(lat, lon)
 
@@ -136,15 +142,12 @@ class WeatherService:
         cached = self._cache_get(key)
         if cached is not None:
             return cached
+
+        g_lat, g_lon = _grid_coord(lat), _grid_coord(lon)
         params = {
-            "latitude": lat,
-            "longitude": lon,
-            "hourly": "wind_speed_10m,precipitation,rain,snowfall",
-            "wind_speed_unit": "mph",
-            "precipitation_unit": "inch",
-            "timezone": "UTC",
-            "forecast_days": 7,
-            "past_days": 1,
+            **self._base_params(),
+            "latitude": g_lat,
+            "longitude": g_lon,
         }
         data = self._get_json(params)
         if isinstance(data, list):
@@ -153,38 +156,78 @@ class WeatherService:
         self._cache_set(key, data)
         return data
 
+    def _fetch_forecast_days_batch(self, cells: list[tuple[float, float]]) -> None:
+        """One Open-Meteo request for several grid cells (free-tier friendly)."""
+        pending = [
+            (lat, lon)
+            for lat, lon in cells
+            if self._cache_get(self._cache_key(lat, lon, "fd7", "fd7")) is None
+        ]
+        if not pending:
+            return
+
+        lats = ",".join(str(lat) for lat, _ in pending)
+        lons = ",".join(str(lon) for _, lon in pending)
+        params = {
+            **self._base_params(),
+            "latitude": lats,
+            "longitude": lons,
+        }
+        data = self._get_json(params)
+        payloads: list[dict[str, Any]]
+        if isinstance(data, list):
+            payloads = [item for item in data if isinstance(item, dict)]
+        elif isinstance(data, dict):
+            # Single-cell responses are plain objects.
+            payloads = [data]
+        else:
+            payloads = []
+
+        if len(payloads) != len(pending):
+            # Fall back to per-cell fetch if the batch shape is unexpected.
+            for lat, lon in pending:
+                try:
+                    self._fetch_forecast_days(lat, lon)
+                except WeatherProviderError as exc:
+                    logger.warning("Weather cell fetch failed for %s,%s: %s", lat, lon, exc)
+            return
+
+        for (lat, lon), payload in zip(pending, payloads):
+            self._cache_set(self._cache_key(lat, lon, "fd7", "fd7"), payload)
+
     def prefetch_locations(self, points: Iterable[tuple[float, float]]) -> None:
-        """Warm the forecast cache for unique ~1km cells before checkpoint scoring."""
+        """Warm the forecast cache for unique grid cells before checkpoint scoring."""
         unique: list[tuple[float, float]] = []
         seen: set[tuple[float, float]] = set()
         for lat, lon in points:
-            key = (round(float(lat), 3), round(float(lon), 3))
-            if key in seen:
+            cell = (_grid_coord(lat), _grid_coord(lon))
+            if cell in seen:
                 continue
-            seen.add(key)
-            unique.append(key)
+            seen.add(cell)
+            unique.append(cell)
 
         if not unique:
             return
 
-        def _warm(cell: tuple[float, float]) -> None:
-            lat, lon = cell
-            cache_key = self._cache_key(lat, lon, "fd7", "fd7")
-            if self._cache_get(cache_key) is not None:
-                return
+        for i in range(0, len(unique), _BATCH_SIZE):
+            chunk = unique[i : i + _BATCH_SIZE]
             try:
-                self._fetch_forecast_days(lat, lon)
-            except Exception:  # noqa: BLE001 — keep analyze moving
-                logger.warning("Weather prefetch failed for %s,%s", lat, lon)
-
-        workers = min(_PREFETCH_WORKERS, len(unique))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_warm, cell) for cell in unique]
-            for fut in as_completed(futures):
-                try:
-                    fut.result()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Unexpected weather prefetch error")
+                self._fetch_forecast_days_batch(chunk)
+            except WeatherProviderError as exc:
+                logger.warning(
+                    "Weather batch prefetch failed (%s); retrying cells one-by-one",
+                    exc,
+                )
+                for lat, lon in chunk:
+                    try:
+                        self._fetch_forecast_days(lat, lon)
+                    except WeatherProviderError as cell_exc:
+                        logger.warning(
+                            "Weather prefetch failed for %s,%s: %s",
+                            lat,
+                            lon,
+                            cell_exc,
+                        )
 
     def weather_at(
         self,
@@ -208,9 +251,14 @@ class WeatherService:
             )
             return normalize_open_meteo_hour(payload, target_time=when)
         except WeatherProviderError as exc:
-            # Log full technical detail server-side; never surface raw provider/network
-            # error text to the UI (see config/exception_handler.py for the same pattern).
             logger.warning("Weather lookup failed for %s,%s: %s", lat, lon, exc.message)
+            # Last chance: any nearby cached cell is better than Unavailable.
+            nearby = self._nearest_cached_payload(lat, lon)
+            if nearby is not None:
+                try:
+                    return normalize_open_meteo_hour(nearby, target_time=when)
+                except Exception:  # noqa: BLE001
+                    pass
             note = (
                 "Weather provider rate limit reached for this checkpoint; forecast not retrieved."
                 if getattr(exc, "status", None) == 429
@@ -232,6 +280,25 @@ class WeatherService:
                 available=False,
                 notes="Weather forecast unavailable for this checkpoint (temporary data issue).",
             )
+
+    def _nearest_cached_payload(self, lat: float, lon: float) -> dict[str, Any] | None:
+        """Reuse a nearby cached forecast when the exact cell failed (rate limit)."""
+        target = (_grid_coord(lat), _grid_coord(lon))
+        best: dict[str, Any] | None = None
+        best_dist = float("inf")
+        with _FORECAST_CACHE_LOCK:
+            items = list(_FORECAST_CACHE.items())
+        for key, payload in items:
+            try:
+                parts = key.split(":")
+                clat, clon = float(parts[0]), float(parts[1])
+            except (ValueError, IndexError):
+                continue
+            dist = abs(clat - target[0]) + abs(clon - target[1])
+            if dist < best_dist and dist <= _GRID_DEG * 2:
+                best_dist = dist
+                best = payload
+        return dict(best) if best is not None else None
 
     def _subsample_points(
         self,
@@ -259,10 +326,6 @@ class WeatherService:
 
         Returns hourly frames (0–48h) with weather at each sample point.
         Missing cells are marked available=False rather than failing.
-        This timeline is independent of per-checkpoint ETA risk analysis.
-
-        One Open-Meteo fetch per unique point covers the full window; frames
-        are sliced from that cache (avoids free-tier rate limits + worker timeouts).
         """
         if hours < 0 or hours > 48:
             raise WeatherProviderError("hours must be between 0 and 48", status=400)
@@ -273,15 +336,7 @@ class WeatherService:
         step = max(1, step_hours)
         points = self._subsample_points(points)
 
-        # Prefetch once per point via stable forecast_days cache (no dated window).
-        for pt in points:
-            lat = float(pt["lat"])
-            lon = float(pt["lon"])
-            try:
-                self.fetch_hourly_forecast(lat, lon, around=start)
-            except WeatherProviderError:
-                # weather_at will surface unavailable cells for this point.
-                pass
+        self.prefetch_locations((float(pt["lat"]), float(pt["lon"])) for pt in points)
 
         frames: list[dict[str, Any]] = []
         for h in range(0, hours + 1, step):

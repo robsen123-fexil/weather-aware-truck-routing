@@ -44,7 +44,7 @@ async function loadCorridorForecast(
 
   if (seed.length === 0) return null
 
-  const points = subsamplePoints(seed, 8)
+  const points = subsamplePoints(seed, 6)
   const attempt = () =>
     postCorridorForecast({
       points,
