@@ -216,6 +216,13 @@ class TripPlannerService:
         risk_summary = summarize_route_risk(enriched_cps)
         coverage = risk_summary.forecast_coverage
         warnings: list[str] = []
+        variant = raw.get("variant") or "provider_alternative"
+        if variant == "via_detour":
+            warnings.append(
+                "Alternative requested from the routing provider via an intermediate "
+                "waypoint to force a different road path. Geometry is the provider's "
+                "real driving route."
+            )
         if risk_summary.has_no_travel:
             warnings.append("Route contains No Travel segments")
         if risk_summary.has_incomplete_forecast:
@@ -230,6 +237,7 @@ class TripPlannerService:
             "provider": raw.get("provider"),
             "profile": raw.get("profile"),
             "alternative_index": raw.get("alternative_index"),
+            "variant": variant,
             "geometry": raw["geometry"],
             "distance_m": raw["distance_m"],
             "distance_miles": raw["distance_miles"],

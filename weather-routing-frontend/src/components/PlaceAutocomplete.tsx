@@ -1,23 +1,25 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { suggestPlaces, type PlaceSuggestion } from '../api/places'
+import { searchErrorMessage } from '../lib/userMessages'
 
 interface PlaceAutocompleteProps {
   id?: string
   label: string
   value: string
   onChange: (value: string) => void
-  /** Called when the user picks a suggestion — includes lat/lon so analyze can skip geocode. */
+  /** Called when the user picks a provider result (carries id + real lat/lon). */
   onSelectPlace?: (place: PlaceSuggestion) => void
+  /** True once a provider result has been chosen for the current text. */
+  selected?: boolean
   placeholder?: string
   disabled?: boolean
   required?: boolean
-  /** When true, never query place suggestions (e.g. GPS lat,lon origin). */
-  suppressSuggest?: boolean
 }
 
-function looksLikeCoordinates(value: string): boolean {
-  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(value.trim())
-}
+type SearchStatus = 'idle' | 'loading' | 'results' | 'empty' | 'error'
+
+const MIN_QUERY_LENGTH = 2
+const DEBOUNCE_MS = 300
 
 export function PlaceAutocomplete({
   id,
@@ -25,75 +27,67 @@ export function PlaceAutocomplete({
   value,
   onChange,
   onSelectPlace,
-  placeholder = 'Start typing a city or country…',
+  selected = false,
+  placeholder = 'Start typing a city, address or place…',
   disabled,
   required,
-  suppressSuggest = false,
 }: PlaceAutocompleteProps) {
   const autoId = useId()
   const inputId = id ?? autoId
   const listId = `${inputId}-list`
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<SearchStatus>('idle')
+  const [errorText, setErrorText] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([])
   const [activeIndex, setActiveIndex] = useState(-1)
-  const [hint, setHint] = useState<string | null>(null)
-  const skipFetchRef = useRef(false)
+  /** Monotonic id — only the newest request may update state (stale-response guard). */
   const reqIdRef = useRef(0)
 
   useEffect(() => {
-    if (skipFetchRef.current) {
-      skipFetchRef.current = false
-      return
-    }
-
     const q = value.trim()
-    if (disabled || suppressSuggest || looksLikeCoordinates(q) || q.length < 2) {
+    // While a provider result is selected for this text there is nothing to search;
+    // editing the text clears the selection (see TripForm) and search resumes.
+    if (disabled || selected || q.length < MIN_QUERY_LENGTH) {
+      reqIdRef.current += 1
       setSuggestions([])
       setOpen(false)
-      setLoading(false)
-      setHint(null)
+      setStatus('idle')
+      setErrorText(null)
       return
     }
 
-    let cancelled = false
     const reqId = ++reqIdRef.current
     const controller = new AbortController()
-    setLoading(true)
-    setHint(null)
+    setStatus('loading')
+    setErrorText(null)
+    setOpen(true)
 
     const timer = window.setTimeout(() => {
       suggestPlaces(q, 6, { signal: controller.signal })
         .then((res) => {
-          if (cancelled || reqId !== reqIdRef.current) return
+          if (reqId !== reqIdRef.current) return
           setSuggestions(res.suggestions)
-          setOpen(true)
           setActiveIndex(-1)
-          setHint(
-            res.suggestions.length === 0
-              ? 'No matching places. Try a city name (e.g. Addis Ababa, Riyadh).'
-              : null,
-          )
+          setStatus(res.suggestions.length === 0 ? 'empty' : 'results')
+          setOpen(true)
         })
         .catch((err) => {
-          if (cancelled || reqId !== reqIdRef.current) return
+          if (reqId !== reqIdRef.current) return
           if (err instanceof DOMException && err.name === 'AbortError') return
+          // Never show stale or fabricated results after a failure.
           setSuggestions([])
-          setOpen(false)
-          setHint('Place search is waking up or busy. Keep typing, or try again in a few seconds.')
+          setErrorText(searchErrorMessage(err))
+          setStatus('error')
+          setOpen(true)
         })
-        .finally(() => {
-          if (!cancelled && reqId === reqIdRef.current) setLoading(false)
-        })
-    }, 280)
+    }, DEBOUNCE_MS)
 
     return () => {
-      cancelled = true
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [value, disabled, suppressSuggest])
+  }, [value, disabled, selected])
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -106,16 +100,21 @@ export function PlaceAutocomplete({
   }, [])
 
   const pick = (item: PlaceSuggestion) => {
-    skipFetchRef.current = true
+    reqIdRef.current += 1
     onChange(item.label)
     onSelectPlace?.(item)
     setSuggestions([])
     setOpen(false)
     setActiveIndex(-1)
-    setHint(null)
+    setStatus('idle')
+    setErrorText(null)
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setOpen(false)
+      return
+    }
     if (!open || suggestions.length === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -127,10 +126,10 @@ export function PlaceAutocomplete({
       e.preventDefault()
       const item = suggestions[activeIndex]
       if (item) pick(item)
-    } else if (e.key === 'Escape') {
-      setOpen(false)
     }
   }
+
+  const showPanel = open && status !== 'idle'
 
   return (
     <div ref={rootRef} className="relative">
@@ -141,7 +140,7 @@ export function PlaceAutocomplete({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => {
-          if (suggestions.length > 0 || hint) setOpen(true)
+          if (status !== 'idle') setOpen(true)
         }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
@@ -149,24 +148,50 @@ export function PlaceAutocomplete({
         disabled={disabled}
         autoComplete="off"
         role="combobox"
-        aria-expanded={open}
+        aria-expanded={showPanel}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-busy={status === 'loading'}
       />
-      {loading && (
-        <span className="pointer-events-none absolute right-3 top-[2.15rem] text-[11px] text-slate-400 dark:text-slate-500">
+      {status === 'loading' && (
+        <span
+          className="pointer-events-none absolute right-3 top-[2.15rem] text-[11px] text-slate-400 dark:text-slate-500"
+          role="status"
+        >
           Searching…
         </span>
       )}
-      {open && suggestions.length > 0 && (
-        <ul
+      {selected && status !== 'loading' && (
+        <span
+          className="pointer-events-none absolute right-3 top-[2.15rem] text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+          title="Location confirmed from the search provider"
+        >
+          ✓ Selected
+        </span>
+      )}
+      {showPanel && (
+        <div
           id={listId}
           role="listbox"
           className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:shadow-black/40"
         >
-          {suggestions.map((item, index) => (
-            <li key={`${item.label}-${item.lat}-${item.lon}`}>
+          {status === 'loading' && (
+            <p className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">Searching places…</p>
+          )}
+          {status === 'empty' && (
+            <p className="px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+              No places found for “{value.trim()}”. Check the spelling or try a nearby city.
+            </p>
+          )}
+          {status === 'error' && errorText && (
+            <p className="px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
+              {errorText}
+            </p>
+          )}
+          {status === 'results' &&
+            suggestions.map((item, index) => (
               <button
+                key={`${item.id ?? item.label}-${item.lat}-${item.lon}`}
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}
@@ -185,12 +210,8 @@ export function PlaceAutocomplete({
                   </span>
                 )}
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {hint && !loading && (
-        <p className="mt-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">{hint}</p>
+            ))}
+        </div>
       )}
     </div>
   )

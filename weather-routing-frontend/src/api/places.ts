@@ -1,6 +1,8 @@
 import { apiRequest, apiRequestWithRetry } from './client'
 
 export interface PlaceSuggestion {
+  /** Provider identifier (ORS Pelias gid or OSM type/id) for the selected place. */
+  id?: string | null
   label: string
   lat: number
   lon: number
@@ -14,6 +16,10 @@ export interface PlaceSuggestion {
 export interface PlaceSuggestResponse {
   query: string
   suggestions: PlaceSuggestion[]
+  /** Which real geocoding provider answered (openrouteservice | nominatim). */
+  provider?: string | null
+  /** True when the backend served a short-lived cached copy of a provider answer. */
+  cached?: boolean
 }
 
 export async function suggestPlaces(
@@ -25,12 +31,12 @@ export async function suggestPlaces(
     q: query,
     limit: String(limit),
   })
-  // Do NOT await ensureApiAwake here — typing cancels each effect, so a long
-  // wake wait makes search appear broken. Retries handle cold starts.
+  // No wake-wait here (typing cancels each effect). A couple of short retries cover
+  // a cold-starting API; real provider failures are surfaced to the caller as errors.
   return apiRequestWithRetry<PlaceSuggestResponse>(`/api/places/suggest/?${qs}`, {
     signal: options?.signal,
-    timeoutMs: 20_000,
-  }, { retries: 4, retryDelayMs: 900 })
+    timeoutMs: 15_000,
+  }, { retries: 2, retryDelayMs: 700 })
 }
 
 export interface ReverseGeocodeResponse {

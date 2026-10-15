@@ -66,6 +66,26 @@ python manage.py runserver
 
 API base: `http://127.0.0.1:8000/api/`
 
+## Data sources (all live; nothing is mocked or hardcoded)
+
+| Concern | Provider | Credential |
+| --- | --- | --- |
+| Place search / autocomplete | OpenRouteService Geocoding (Pelias), then OpenStreetMap Nominatim | `OPENROUTESERVICE_API_KEY` (server env only); Nominatim needs none |
+| Driving routes + geometry | OpenRouteService Directions and OSRM | `OPENROUTESERVICE_API_KEY`; OSRM needs none |
+| Weather | Open-Meteo, Met.no fallback | none |
+
+- `GET /api/places/suggest/?q=<text>&limit=6` forwards the typed text to the providers above and returns
+  `{query, suggestions[{id,label,lat,lon,type,country,state,city,source}], provider, cached}`.
+  An empty `suggestions` list means a provider answered with zero matches. If every provider fails the API
+  returns `503 location_service_unavailable` (or `429 location_service_rate_limited`), never an empty or invented list.
+- Successful provider answers are cached briefly (5 min search, 15 min geocode) and flagged `cached: true`;
+  failures are never cached.
+- Route geometry always comes from the routing provider's response. Alternatives forced through an intermediate
+  waypoint are labelled `variant: "via_detour"` with a warning. If every routing provider fails, the API returns
+  an error; no straight-line or sample route is ever returned.
+- Without `OPENROUTESERVICE_API_KEY`, search falls back to Nominatim and routing to OSRM (still real services,
+  each result carries its `source`).
+
 ## Interactive docs
 
 With the server running, open:

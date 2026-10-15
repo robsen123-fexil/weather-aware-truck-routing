@@ -252,11 +252,25 @@ class PlaceSuggestView(APIView):
         serializer = PlaceSuggestQuerySerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        suggestions = get_routing_service().suggest_places(
-            data["q"],
-            limit=data.get("limit", 6),
+        try:
+            result = get_routing_service().suggest_places(
+                data["q"],
+                limit=data.get("limit", 6),
+            )
+        except WeatherRoutingError as exc:
+            # Provider outage / rate limit: surface an honest error, never an empty
+            # or fabricated suggestion list.
+            return _error_response(exc)
+        response = Response(
+            {
+                "query": data["q"],
+                "suggestions": result["suggestions"],
+                "provider": result["provider"],
+                "cached": result["cached"],
+            }
         )
-        return Response({"query": data["q"], "suggestions": suggestions})
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class PlaceReverseView(APIView):

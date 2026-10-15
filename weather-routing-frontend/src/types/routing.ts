@@ -114,6 +114,8 @@ export interface AnalyzedRoute {
   provider?: string
   profile?: string
   alternative_index?: number
+  /** provider_alternative (native alternative) or via_detour (provider route via a waypoint). */
+  variant?: string
   rank?: number
   geometry: RouteGeometry
   distance_m: number

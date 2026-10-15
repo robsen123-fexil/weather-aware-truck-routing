@@ -24,6 +24,20 @@ class GeocodingError(WeatherRoutingError):
     default_status = 502
 
 
+class LocationServiceUnavailableError(GeocodingError):
+    """Every location-search provider failed (outage, timeout, bad key)."""
+
+    default_code = "location_service_unavailable"
+    default_status = 503
+
+
+class LocationServiceRateLimitedError(GeocodingError):
+    """Location-search providers rejected the request as rate limited."""
+
+    default_code = "location_service_rate_limited"
+    default_status = 429
+
+
 class RoutingError(WeatherRoutingError):
     default_code = "routing_error"
     default_status = 502

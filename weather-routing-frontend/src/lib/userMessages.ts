@@ -58,6 +58,28 @@ export function userFacingError(err: unknown): string {
   return 'Unable to analyze this trip right now. Please try again.'
 }
 
+/** Honest copy for the place-search dropdown (never implies "no results" on failure). */
+export function searchErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429 || err.code === 'location_service_rate_limited') {
+      return 'Location search is rate-limited right now. Wait a few seconds and keep typing to retry.'
+    }
+    if (err.code === 'location_service_unavailable') {
+      return 'The location search service is unavailable right now, so no results can be shown. Try again shortly.'
+    }
+    if (err.code === 'timeout' || err.status === 504) {
+      return 'Location search timed out. Keep typing or try again in a moment.'
+    }
+    if (err.code === 'network_error' || err.code === 'gateway_error' || err.status === 0 || err.status >= 502) {
+      return 'Could not reach the planning API (it may be starting up on free hosting). Try again in a few seconds.'
+    }
+    if (err.status === 400) {
+      return 'That search text is not valid. Try a different place name.'
+    }
+  }
+  return 'Location search failed. Please try again.'
+}
+
 /** Turn backend warning strings into product language where needed. */
 export function userFacingWarning(warning: string): string {
   if (warning.startsWith('routing_alternatives:')) {

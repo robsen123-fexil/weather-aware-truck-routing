@@ -4,26 +4,56 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 import uuid
 from typing import Any
 
 import requests
 from django.conf import settings
 
-from shared.exceptions import GeocodingError, RoutingError, ValidationAppError
+from shared.exceptions import (
+    GeocodingError,
+    LocationServiceRateLimitedError,
+    LocationServiceUnavailableError,
+    RoutingError,
+    ValidationAppError,
+)
 
 logger = logging.getLogger(__name__)
 
-# Process-wide geocode / suggest caches — cuts Nominatim 429s from autocomplete + analyze.
-_GEOCODE_CACHE: dict[str, dict[str, Any]] = {}
-_SUGGEST_CACHE: dict[str, list[dict[str, Any]]] = {}
+# Short-lived caches of REAL provider responses (never synthesized data). They only
+# store successful provider results, expire quickly, and responses are flagged
+# `cached: true` so the UI/clients can tell live results from cached ones.
+_GEOCODE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_SUGGEST_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _CACHE_MAX = 256
+_GEOCODE_TTL_S = 15 * 60
+_SUGGEST_TTL_S = 5 * 60
 
 
 def _cache_put(cache: dict[str, Any], key: str, value: Any) -> None:
     if len(cache) >= _CACHE_MAX:
         cache.pop(next(iter(cache)), None)
-    cache[key] = value
+    cache[key] = (time.monotonic(), value)
+
+
+def _cache_get(cache: dict[str, Any], key: str, ttl: float) -> Any | None:
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    stored_at, value = entry
+    if time.monotonic() - stored_at > ttl:
+        cache.pop(key, None)
+        return None
+    return value
+
+
+class _ProviderFailure(Exception):
+    """Internal: one geocoding provider could not answer (never returned to clients)."""
+
+    def __init__(self, message: str, *, rate_limited: bool = False):
+        super().__init__(message)
+        self.rate_limited = rate_limited
 
 
 class RoutingService:
@@ -76,9 +106,9 @@ class RoutingService:
                     pass
 
         cache_key = place.casefold()
-        cached = _GEOCODE_CACHE.get(cache_key)
+        cached = _cache_get(_GEOCODE_CACHE, cache_key, _GEOCODE_TTL_S)
         if cached is not None:
-            return dict(cached)
+            return {**cached, "cached": True}
 
         # Prefer ORS when keyed — Nominatim public API rate-limits hard (429)
         # after autocomplete traffic. Fall back the other way if needed.
@@ -158,7 +188,7 @@ class RoutingService:
             response = requests.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": place, "format": "json", "limit": 1},
-                headers={"User-Agent": "weather-aware-truck-routing/1.0 (contact: local-dev)"},
+                headers={"User-Agent": "weather-aware-truck-routing/1.0 (https://github.com/robsen123-fexil/weather-aware-truck-routing)"},
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:
@@ -257,36 +287,74 @@ class RoutingService:
             "source": "nominatim-reverse",
         }
 
-    def suggest_places(self, query: str, *, limit: int = 6) -> list[dict[str, Any]]:
+    def suggest_places(self, query: str, *, limit: int = 6) -> dict[str, Any]:
         """
-        Place autocomplete suggestions (cities/regions/countries).
+        Place autocomplete backed ONLY by real geocoding providers.
 
-        Prefers OpenRouteService when keyed (avoids Nominatim 429s). Returns an
-        empty list on failure so the UI can keep typing without hard errors.
+        Provider order: OpenRouteService (Pelias, needs OPENROUTESERVICE_API_KEY),
+        then OpenStreetMap Nominatim. Every suggestion carries its `source`.
+
+        Returns {"suggestions": [...], "provider": str|None, "cached": bool}.
+        An empty `suggestions` list means a provider answered with zero matches.
+        If every provider fails (outage, timeout, rate limit, bad key) this RAISES
+        instead of returning an empty/fabricated list.
         """
         query = (query or "").strip()
-        if len(query) < 1:
-            return []
+        if not query:
+            raise ValidationAppError("Query is required.")
 
         limit = max(1, min(int(limit), 10))
         cache_key = f"{query.casefold()}|{limit}"
-        cached = _SUGGEST_CACHE.get(cache_key)
+        cached = _cache_get(_SUGGEST_CACHE, cache_key, _SUGGEST_TTL_S)
         if cached is not None:
-            return [dict(item) for item in cached]
+            return {
+                "suggestions": [dict(item) for item in cached["suggestions"]],
+                "provider": cached["provider"],
+                "cached": True,
+            }
 
+        rate_limited = False
+        answered = False  # at least one provider returned a valid (maybe empty) answer
         suggestions: list[dict[str, Any]] = []
-        if self.api_key:
-            try:
-                suggestions = self._suggest_ors(query, limit=limit)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("ORS place suggest failed (%s); trying Nominatim", exc)
+        provider: str | None = None
 
-        if not suggestions:
-            suggestions = self._suggest_nominatim(query, limit=limit)
+        providers: list[tuple[str, Any]] = []
+        if self.api_key:
+            providers.append(("openrouteservice", self._suggest_ors))
+        else:
+            logger.warning(
+                "OPENROUTESERVICE_API_KEY is not set; place search uses Nominatim only."
+            )
+        providers.append(("nominatim", self._suggest_nominatim))
+
+        for name, fn in providers:
+            try:
+                found = fn(query, limit=limit)
+            except _ProviderFailure as exc:
+                rate_limited = rate_limited or exc.rate_limited
+                logger.warning("Place suggest via %s failed: %s", name, exc)
+                continue
+            answered = True
+            if found:
+                suggestions, provider = found, name
+                break
+
+        if not suggestions and not answered:
+            if rate_limited:
+                raise LocationServiceRateLimitedError("Location providers are rate-limited.")
+            raise LocationServiceUnavailableError("All location providers failed.")
 
         if suggestions:
-            _cache_put(_SUGGEST_CACHE, cache_key, suggestions)
-        return [dict(item) for item in suggestions]
+            _cache_put(
+                _SUGGEST_CACHE,
+                cache_key,
+                {"suggestions": suggestions, "provider": provider},
+            )
+        return {
+            "suggestions": [dict(item) for item in suggestions],
+            "provider": provider,
+            "cached": False,
+        }
 
     @staticmethod
     def _suggest_rank(item: dict[str, Any]) -> int:
@@ -303,27 +371,34 @@ class RoutingService:
         return 5
 
     def _suggest_ors(self, query: str, *, limit: int) -> list[dict[str, Any]]:
-        response = requests.get(
-            f"{self.base}/geocode/autocomplete",
-            params={
-                "text": query,
-                "size": max(limit, 8),
-                # Bias toward places that sit on the road network.
-                "layers": "locality,localadmin,county,neighbourhood,address,venue,region,country",
-            },
-            headers={"Authorization": self._auth_header()},
-            timeout=min(self.timeout, 12),
-        )
+        try:
+            response = requests.get(
+                f"{self.base}/geocode/autocomplete",
+                params={
+                    "text": query,
+                    "size": max(limit, 8),
+                    # Bias toward places that sit on the road network.
+                    "layers": "locality,localadmin,county,neighbourhood,address,venue,region,country",
+                },
+                headers={"Authorization": self._auth_header()},
+                timeout=min(self.timeout, 12),
+            )
+        except requests.RequestException as exc:
+            raise _ProviderFailure(f"ORS request failed: {exc}") from exc
+        except RoutingError as exc:  # missing/invalid key
+            raise _ProviderFailure(exc.message) from exc
         if response.status_code == 429:
-            logger.warning("Place suggest rate-limited by ORS")
-            return []
+            raise _ProviderFailure("ORS rate limited", rate_limited=True)
         if response.status_code >= 400:
-            logger.warning("ORS place suggest HTTP %s", response.status_code)
-            return []
+            raise _ProviderFailure(f"ORS HTTP {response.status_code}")
+        try:
+            features = response.json().get("features") or []
+        except ValueError as exc:
+            raise _ProviderFailure("ORS returned invalid JSON") from exc
 
         suggestions: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for feature in response.json().get("features") or []:
+        for feature in features:
             props = feature.get("properties") or {}
             geometry = feature.get("geometry") or {}
             coords = geometry.get("coordinates") or []
@@ -335,6 +410,7 @@ class RoutingService:
             seen.add(label.lower())
             suggestions.append(
                 {
+                    "id": props.get("gid") or props.get("id"),
                     "label": label,
                     "lat": float(coords[1]),
                     "lon": float(coords[0]),
@@ -358,17 +434,19 @@ class RoutingService:
                     "addressdetails": 1,
                     "limit": limit,
                 },
-                headers={"User-Agent": "weather-aware-truck-routing/1.0 (contact: local-dev)"},
+                headers={"User-Agent": "weather-aware-truck-routing/1.0 (https://github.com/robsen123-fexil/weather-aware-truck-routing)"},
                 timeout=min(self.timeout, 12),
             )
-            if response.status_code == 429:
-                logger.warning("Place suggest rate-limited by Nominatim")
-                return []
-            response.raise_for_status()
-            results = response.json() or []
         except requests.RequestException as exc:
-            logger.warning("Place suggest failed: %s", exc)
-            return []
+            raise _ProviderFailure(f"Nominatim request failed: {exc}") from exc
+        if response.status_code == 429:
+            raise _ProviderFailure("Nominatim rate limited", rate_limited=True)
+        if response.status_code >= 400:
+            raise _ProviderFailure(f"Nominatim HTTP {response.status_code}")
+        try:
+            results = response.json() or []
+        except ValueError as exc:
+            raise _ProviderFailure("Nominatim returned invalid JSON") from exc
 
         suggestions: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -378,8 +456,14 @@ class RoutingService:
                 continue
             seen.add(label.lower())
             address = hit.get("address") or {}
+            osm_id = (
+                f"{hit.get('osm_type')}/{hit.get('osm_id')}"
+                if hit.get("osm_type") and hit.get("osm_id")
+                else hit.get("place_id")
+            )
             suggestions.append(
                 {
+                    "id": str(osm_id) if osm_id is not None else None,
                     "label": label,
                     "lat": float(hit["lat"]),
                     "lon": float(hit["lon"]),
@@ -601,6 +685,8 @@ class RoutingService:
                         origin, via, destination, max_alternatives=1
                     )
                     if detour:
+                        for r in detour:
+                            r["variant"] = "via_detour"
                         batches.append(detour)
                         continue
                 except RoutingError as exc:
@@ -618,6 +704,8 @@ class RoutingService:
                         }
                         routes = self._directions(profile, body)
                         if routes:
+                            for r in routes:
+                                r["variant"] = "via_detour"
                             batches.append(routes)
                             break
                     except RoutingError as exc:

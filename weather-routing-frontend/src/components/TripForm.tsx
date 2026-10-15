@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { suggestPlaces, type PlaceSuggestion } from '../api/places'
+import type { PlaceSuggestion } from '../api/places'
 import type { AnalyzeRoutesRequest, CheckpointInterval } from '../types/routing'
 import { PlaceAutocomplete } from './PlaceAutocomplete'
 
@@ -21,9 +21,9 @@ function coordsString(lat: number, lon: number): string {
 export function TripForm({ loading, onSubmit }: TripFormProps) {
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
-  /** Saved lat/lon from autocomplete so analyze skips Nominatim geocode. */
-  const [originCoords, setOriginCoords] = useState<{ lat: number; lon: number } | null>(null)
-  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lon: number } | null>(null)
+  /** The exact provider result the user picked (id + real lat/lon), per field. */
+  const [originPlace, setOriginPlace] = useState<PlaceSuggestion | null>(null)
+  const [destinationPlace, setDestinationPlace] = useState<PlaceSuggestion | null>(null)
   const [departureLocal, setDepartureLocal] = useState(() => nowLocalInputValue())
   const [loadWeight, setLoadWeight] = useState(35000)
   const [interval, setIntervalMiles] = useState<CheckpointInterval>(25)
@@ -38,50 +38,32 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     return () => window.clearInterval(id)
   }, [departureLockedToNow])
 
+  // Editing the text invalidates the previously selected place: the user must pick
+  // a (new) provider result before analysis is allowed.
   const handleOriginChange = (value: string) => {
     setOrigin(value)
-    setOriginCoords(null)
+    setOriginPlace(null)
   }
 
   const handleDestinationChange = (value: string) => {
     setDestination(value)
-    setDestinationCoords(null)
+    setDestinationPlace(null)
   }
 
-  const handleOriginSelect = (place: PlaceSuggestion) => {
-    setOrigin(place.label)
-    setOriginCoords({ lat: place.lat, lon: place.lon })
+  const selectOrigin = (place: PlaceSuggestion) => {
+    setOriginPlace(place)
+    setFormError(null)
   }
 
-  const handleDestinationSelect = (place: PlaceSuggestion) => {
-    setDestination(place.label)
-    setDestinationCoords({ lat: place.lat, lon: place.lon })
+  const selectDestination = (place: PlaceSuggestion) => {
+    setDestinationPlace(place)
+    setFormError(null)
   }
 
-  const resolvePlaceCoords = async (
-    text: string,
-    existing: { lat: number; lon: number } | null,
-  ): Promise<{ lat: number; lon: number } | null> => {
-    if (existing) return existing
-    const trimmed = text.trim()
-    if (!trimmed) return null
-    if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(trimmed)) {
-      const [a, b] = trimmed.split(',').map((p) => Number(p.trim()))
-      if (Number.isFinite(a) && Number.isFinite(b)) return { lat: a!, lon: b! }
-    }
-    try {
-      const res = await suggestPlaces(trimmed, 1)
-      const hit = res.suggestions[0]
-      if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
-        return { lat: hit.lat, lon: hit.lon }
-      }
-    } catch {
-      /* analyze will still attempt server-side geocode */
-    }
-    return null
-  }
+  const isValidPlace = (place: PlaceSuggestion | null): place is PlaceSuggestion =>
+    place != null && Number.isFinite(place.lat) && Number.isFinite(place.lon)
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (loading) return
     setFormError(null)
@@ -106,23 +88,22 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       return
     }
 
-    // Prefer lat,lon so the backend skips geocode (faster + avoids rate limits).
-    const [resolvedOrigin, resolvedDest] = await Promise.all([
-      resolvePlaceCoords(origin, originCoords),
-      resolvePlaceCoords(destination, destinationCoords),
-    ])
-    if (!resolvedOrigin || !resolvedDest) {
+    // Only provider-confirmed places may be analyzed — no guessing, no auto-picking
+    // the first suggestion, no typed-text fallback.
+    if (!isValidPlace(originPlace) || !isValidPlace(destinationPlace)) {
+      const missing = [
+        !isValidPlace(originPlace) ? 'origin' : null,
+        !isValidPlace(destinationPlace) ? 'destination' : null,
+      ].filter(Boolean)
       setFormError(
-        'Select origin and destination from the suggestion list so we can find road routes.',
+        `Choose your ${missing.join(' and ')} from the search results so we use its real location.`,
       )
       return
     }
-    setOriginCoords(resolvedOrigin)
-    setDestinationCoords(resolvedDest)
 
     onSubmit({
-      origin: coordsString(resolvedOrigin.lat, resolvedOrigin.lon),
-      destination: coordsString(resolvedDest.lat, resolvedDest.lon),
+      origin: coordsString(originPlace.lat, originPlace.lon),
+      destination: coordsString(destinationPlace.lat, destinationPlace.lon),
       departure: departure.toISOString(),
       load_weight_lb: weight,
       checkpoint_interval_miles: interval,
@@ -137,21 +118,23 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
         label="Origin"
         value={origin}
         onChange={handleOriginChange}
-        onSelectPlace={handleOriginSelect}
+        onSelectPlace={selectOrigin}
+        selected={originPlace != null}
         required
         disabled={loading}
-        placeholder="Type your city (e.g. Riyadh, Cairo, Istanbul)…"
+        placeholder="Search origin (city, address or place)…"
       />
 
       <PlaceAutocomplete
         id="destination"
         label="Destination"
-        onSelectPlace={handleDestinationSelect}
+        onSelectPlace={selectDestination}
+        selected={destinationPlace != null}
         value={destination}
         onChange={handleDestinationChange}
         required
         disabled={loading}
-        placeholder="Type destination city…"
+        placeholder="Search destination (city, address or place)…"
       />
 
       <div>

@@ -9,6 +9,8 @@ from rest_framework.views import exception_handler
 
 from shared.exceptions import (
     GeocodingError,
+    LocationServiceRateLimitedError,
+    LocationServiceUnavailableError,
     RouteNotFoundError,
     RoutingError,
     ValidationAppError,
@@ -32,6 +34,16 @@ def public_message(exc: WeatherRoutingError) -> str:
     """
     if isinstance(exc, ValidationAppError):
         return "Please check the origin, destination, and departure time, then try again."
+    if isinstance(exc, LocationServiceRateLimitedError):
+        return (
+            "The location search service is rate-limited right now. "
+            "Wait a few seconds and try again."
+        )
+    if isinstance(exc, LocationServiceUnavailableError):
+        return (
+            "The location search service is unavailable right now, so no results "
+            "can be shown. Please try again shortly."
+        )
     if isinstance(exc, GeocodingError):
         # Allowlist the specific, hand-written "not found" / rate-limit messages
         # (helpful: they name the place that failed to resolve). Everything else
