@@ -55,8 +55,8 @@ class TripPlannerService:
                 f"routing_alternatives:{len(raw_routes)}"
             )
 
-        # Build checkpoints first, then prefetch weather in parallel so analyze
-        # does not run dozens of sequential Open-Meteo calls (timeout risk).
+        # Build checkpoints first, then warm a small set of weather cells.
+        # Free Open-Meteo rate-limits hard if we fan out every checkpoint.
         prepared: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
         weather_points: list[tuple[float, float]] = []
         for raw in raw_routes:
@@ -72,7 +72,19 @@ class TripPlannerService:
                 total_distance_m=raw["distance_m"],
             )
             prepared.append((raw, checkpoints))
-            for cp in checkpoints:
+            # Prefer endpoints + midpoints so short trips still get coverage
+            # without one HTTP call per near-duplicate checkpoint.
+            n = len(checkpoints)
+            if n == 0:
+                continue
+            indexes = {0, n - 1}
+            if n > 2:
+                indexes.add(n // 2)
+            if n > 4:
+                indexes.add(n // 4)
+                indexes.add((3 * n) // 4)
+            for i in sorted(indexes):
+                cp = checkpoints[i]
                 weather_points.append(
                     (cp["coordinates"]["lat"], cp["coordinates"]["lon"])
                 )

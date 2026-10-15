@@ -44,22 +44,15 @@ async function loadCorridorForecast(
 
   if (seed.length === 0) return null
 
-  const points = subsamplePoints(seed, 6)
-  const attempt = () =>
-    postCorridorForecast({
-      points,
-      start: result.request.departure,
-      hours: 48,
-      step_hours: 3,
-    }, { signal })
-
-  try {
-    return await attempt()
-  } catch (err) {
-    if (signal.aborted) throw err
-    // One retry — free-tier weather / cold starts can flake once.
-    return attempt()
-  }
+  // Keep corridor samples tiny — analyze already warmed weather cache; a large
+  // corridor refetch is the main trigger for Open-Meteo 429 / 0% coverage.
+  const points = subsamplePoints(seed, 4)
+  return postCorridorForecast({
+    points,
+    start: result.request.departure,
+    hours: 48,
+    step_hours: 3,
+  }, { signal })
 }
 
 export function useRouteAnalysis() {

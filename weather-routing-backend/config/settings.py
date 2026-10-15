@@ -137,6 +137,8 @@ CORS_ALLOW_CREDENTIALS = True
 # External services / app settings
 OPENROUTESERVICE_API_KEY = os.getenv("OPENROUTESERVICE_API_KEY", "")
 OPEN_METEO_BASE_URL = os.getenv("OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1")
+# Optional commercial key — use with https://customer-api.open-meteo.com/v1 for higher limits.
+OPEN_METEO_API_KEY = os.getenv("OPEN_METEO_API_KEY", "")
 DEFAULT_CHECKPOINT_INTERVAL_MILES = int(os.getenv("DEFAULT_CHECKPOINT_INTERVAL_MILES", "25"))
 ROUTING_PROFILE = os.getenv("ROUTING_PROFILE", "driving-hgv")
 HTTP_TIMEOUT_SECONDS = int(os.getenv("HTTP_TIMEOUT_SECONDS", "30"))
