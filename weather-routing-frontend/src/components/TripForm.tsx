@@ -111,19 +111,18 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       resolvePlaceCoords(origin, originCoords),
       resolvePlaceCoords(destination, destinationCoords),
     ])
-    if (resolvedOrigin) setOriginCoords(resolvedOrigin)
-    if (resolvedDest) setDestinationCoords(resolvedDest)
-
-    const originValue = resolvedOrigin
-      ? coordsString(resolvedOrigin.lat, resolvedOrigin.lon)
-      : origin.trim()
-    const destinationValue = resolvedDest
-      ? coordsString(resolvedDest.lat, resolvedDest.lon)
-      : destination.trim()
+    if (!resolvedOrigin || !resolvedDest) {
+      setFormError(
+        'Select origin and destination from the suggestion list so we can find road routes.',
+      )
+      return
+    }
+    setOriginCoords(resolvedOrigin)
+    setDestinationCoords(resolvedDest)
 
     onSubmit({
-      origin: originValue,
-      destination: destinationValue,
+      origin: coordsString(resolvedOrigin.lat, resolvedOrigin.lon),
+      destination: coordsString(resolvedDest.lat, resolvedDest.lon),
       departure: departure.toISOString(),
       load_weight_lb: weight,
       checkpoint_interval_miles: interval,

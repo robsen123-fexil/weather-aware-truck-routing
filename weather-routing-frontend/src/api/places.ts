@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestWithRetry, ensureApiAwake } from './client'
+import { apiRequest, apiRequestWithRetry } from './client'
 
 export interface PlaceSuggestion {
   label: string
@@ -19,19 +19,18 @@ export interface PlaceSuggestResponse {
 export async function suggestPlaces(
   query: string,
   limit = 6,
+  options?: { signal?: AbortSignal },
 ): Promise<PlaceSuggestResponse> {
   const qs = new URLSearchParams({
     q: query,
     limit: String(limit),
   })
-  try {
-    await ensureApiAwake()
-  } catch {
-    /* suggest retry still handles cold start */
-  }
+  // Do NOT await ensureApiAwake here — typing cancels each effect, so a long
+  // wake wait makes search appear broken. Retries handle cold starts.
   return apiRequestWithRetry<PlaceSuggestResponse>(`/api/places/suggest/?${qs}`, {
-    timeoutMs: 25_000,
-  }, { retries: 3, retryDelayMs: 1000 })
+    signal: options?.signal,
+    timeoutMs: 20_000,
+  }, { retries: 4, retryDelayMs: 900 })
 }
 
 export interface ReverseGeocodeResponse {
@@ -54,5 +53,7 @@ export async function reverseGeocode(
     lat: String(lat),
     lon: String(lon),
   })
-  return apiRequest<ReverseGeocodeResponse>(`/api/places/reverse/?${qs}`)
+  return apiRequest<ReverseGeocodeResponse>(`/api/places/reverse/?${qs}`, {
+    timeoutMs: 20_000,
+  })
 }

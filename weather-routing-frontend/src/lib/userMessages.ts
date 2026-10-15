@@ -31,7 +31,10 @@ export function userFacingError(err: unknown): string {
       return err.message || 'We could not resolve that place name. Try another spelling or pick a suggestion.'
     }
     if (err.status === 503 || err.code === 'routing_error') {
-      return 'Route planning is temporarily unavailable. Try again in a few minutes.'
+      return (
+        'We could not calculate road routes for those places. '
+        + 'Pick city-level suggestions (not a whole country) and try again.'
+      )
     }
     if (err.status === 502) {
       return 'We could not calculate routes for this trip. Try different locations or try again.'

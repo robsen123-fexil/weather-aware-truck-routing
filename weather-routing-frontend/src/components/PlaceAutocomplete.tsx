@@ -38,7 +38,9 @@ export function PlaceAutocomplete({
   const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([])
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [hint, setHint] = useState<string | null>(null)
   const skipFetchRef = useRef(false)
+  const reqIdRef = useRef(0)
 
   useEffect(() => {
     if (skipFetchRef.current) {
@@ -51,33 +53,45 @@ export function PlaceAutocomplete({
       setSuggestions([])
       setOpen(false)
       setLoading(false)
+      setHint(null)
       return
     }
 
     let cancelled = false
+    const reqId = ++reqIdRef.current
+    const controller = new AbortController()
     setLoading(true)
-    // Longer debounce — Nominatim bans clients that type-ahead too aggressively.
+    setHint(null)
+
     const timer = window.setTimeout(() => {
-      suggestPlaces(q, 5)
+      suggestPlaces(q, 6, { signal: controller.signal })
         .then((res) => {
-          if (cancelled) return
+          if (cancelled || reqId !== reqIdRef.current) return
           setSuggestions(res.suggestions)
-          setOpen(res.suggestions.length > 0)
+          setOpen(true)
           setActiveIndex(-1)
+          setHint(
+            res.suggestions.length === 0
+              ? 'No matching places. Try a city name (e.g. Addis Ababa, Riyadh).'
+              : null,
+          )
         })
-        .catch(() => {
-          if (cancelled) return
+        .catch((err) => {
+          if (cancelled || reqId !== reqIdRef.current) return
+          if (err instanceof DOMException && err.name === 'AbortError') return
           setSuggestions([])
           setOpen(false)
+          setHint('Place search is waking up or busy. Keep typing, or try again in a few seconds.')
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (!cancelled && reqId === reqIdRef.current) setLoading(false)
         })
-    }, 550)
+    }, 280)
 
     return () => {
       cancelled = true
       window.clearTimeout(timer)
+      controller.abort()
     }
   }, [value, disabled, suppressSuggest])
 
@@ -98,6 +112,7 @@ export function PlaceAutocomplete({
     setSuggestions([])
     setOpen(false)
     setActiveIndex(-1)
+    setHint(null)
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -126,7 +141,7 @@ export function PlaceAutocomplete({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => {
-          if (suggestions.length > 0) setOpen(true)
+          if (suggestions.length > 0 || hint) setOpen(true)
         }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
@@ -173,6 +188,9 @@ export function PlaceAutocomplete({
             </li>
           ))}
         </ul>
+      )}
+      {hint && !loading && (
+        <p className="mt-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">{hint}</p>
       )}
     </div>
   )

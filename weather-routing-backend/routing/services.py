@@ -288,10 +288,29 @@ class RoutingService:
             _cache_put(_SUGGEST_CACHE, cache_key, suggestions)
         return [dict(item) for item in suggestions]
 
+    @staticmethod
+    def _suggest_rank(item: dict[str, Any]) -> int:
+        """Prefer cities/localities over country centroids (better for routing)."""
+        layer = str(item.get("type") or "").lower()
+        if layer in {"locality", "localadmin", "borough", "neighbourhood", "neighborhood"}:
+            return 0
+        if layer in {"county", "region", "macroregion"}:
+            return 1
+        if layer in {"venue", "address", "street", "place"}:
+            return 2
+        if layer == "country":
+            return 9
+        return 5
+
     def _suggest_ors(self, query: str, *, limit: int) -> list[dict[str, Any]]:
         response = requests.get(
             f"{self.base}/geocode/autocomplete",
-            params={"text": query, "size": limit},
+            params={
+                "text": query,
+                "size": max(limit, 8),
+                # Bias toward places that sit on the road network.
+                "layers": "locality,localadmin,county,neighbourhood,address,venue,region,country",
+            },
             headers={"Authorization": self._auth_header()},
             timeout=min(self.timeout, 12),
         )
@@ -326,7 +345,8 @@ class RoutingService:
                     "source": "openrouteservice",
                 }
             )
-        return suggestions
+        suggestions.sort(key=self._suggest_rank)
+        return suggestions[:limit]
 
     def _suggest_nominatim(self, query: str, *, limit: int) -> list[dict[str, Any]]:
         try:
@@ -496,6 +516,8 @@ class RoutingService:
                 [origin["lon"], origin["lat"]],
                 [destination["lon"], destination["lat"]],
             ],
+            # Snap far-from-road geocode points (country centroids, parks, etc.).
+            "radiuses": [-1, -1],
             "instructions": False,
             "geometry": True,
             "elevation": False,
@@ -564,6 +586,9 @@ class RoutingService:
                             profile,
                             exc.message,
                         )
+                        # Unroutable snap will not improve across preferences — stop early.
+                        if "Could not find routable point" in str(exc.message):
+                            break
 
         # 4) Via-point detours to force remaining alternatives
         if merged_count() < max_alternatives:
@@ -589,6 +614,7 @@ class RoutingService:
                                 [via["lon"], via["lat"]],
                                 [destination["lon"], destination["lat"]],
                             ],
+                            "radiuses": [-1, -1, -1],
                         }
                         routes = self._directions(profile, body)
                         if routes:
@@ -630,6 +656,8 @@ class RoutingService:
                     "overview": "full",
                     "geometries": "geojson",
                     "alternatives": alt_param,
+                    # Large snap radius so city-center / suburb geocodes still route.
+                    "radiuses": "5000;5000",
                 },
                 timeout=self.timeout,
             )
