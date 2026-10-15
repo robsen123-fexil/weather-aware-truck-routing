@@ -32,7 +32,7 @@ _FORECAST_CACHE_MAX = 768
 # Global outbound throttle — free Open-Meteo punishes bursts hard.
 _HTTP_LOCK = threading.Lock()
 _LAST_HTTP_AT = 0.0
-_MIN_HTTP_GAP_S = 0.9
+_MIN_HTTP_GAP_S = 0.55
 _RATE_LIMIT_COOLDOWN_S = 0.0
 
 
@@ -133,9 +133,11 @@ class WeatherService:
                 raise WeatherProviderError(f"Weather request failed: {exc}") from exc
 
             if response.status_code == 429:
-                self._mark_rate_limited(6.0 + 3.0 * attempt)
+                self._mark_rate_limited(3.0 + 1.5 * attempt)
                 if attempt < retries:
-                    time.sleep(4.0 + 3.0 * attempt)
+                    # Keep sleeps short — long cool-downs make Render return 502
+                    # for the whole analyze before any forecast is attached.
+                    time.sleep(1.5 + 1.25 * attempt)
                     continue
                 raise WeatherProviderError("Weather API rate limit exceeded.", status=429)
             if response.status_code >= 400:
@@ -263,13 +265,15 @@ class WeatherService:
                 self._fetch_forecast_days_batch(chunk)
             except WeatherProviderError as exc:
                 logger.warning(
-                    "Weather batch prefetch failed (%s); cooling down then single-cell retry",
+                    "Weather batch prefetch failed (%s); brief cooldown then one cell",
                     exc,
                 )
-                # Do NOT immediately hammer one-by-one — that deepens 429s.
-                self._mark_rate_limited(8.0)
-                time.sleep(5.0)
-                for lat, lon in chunk:
+                # One recovery cell only — more sequential calls worsen 429s and
+                # risk gateway 502s on free Render. Checkpoint scoring reuses
+                # nearby cache when exact cells are still cold.
+                self._mark_rate_limited(3.0)
+                time.sleep(1.5)
+                for lat, lon in chunk[:1]:
                     if self._cache_get(self._cache_key(lat, lon, "fd7", "fd7")) is not None:
                         continue
                     try:
@@ -281,10 +285,6 @@ class WeatherService:
                             lon,
                             cell_exc,
                         )
-                        # Stop further cells this round; nearby-cache fallback will cover.
-                        if getattr(cell_exc, "status", None) == 429:
-                            self._mark_rate_limited(10.0)
-                            break
 
     def weather_at(
         self,
