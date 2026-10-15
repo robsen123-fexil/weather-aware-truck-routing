@@ -127,7 +127,15 @@ class WeatherService:
             self._throttle()
             try:
                 # Cap per-request wait so analyze stays under Render's gateway budget.
-                response = requests.get(url, params=params, timeout=min(self.timeout, 12))
+                response = requests.get(
+                    url,
+                    params=params,
+                    headers={
+                        "User-Agent": "weather-aware-truck-routing/1.0",
+                        "Accept": "application/json",
+                    },
+                    timeout=min(self.timeout, 12),
+                )
             except requests.RequestException as exc:
                 last_exc = exc
                 if attempt < retries:
@@ -183,12 +191,101 @@ class WeatherService:
             "latitude": g_lat,
             "longitude": g_lon,
         }
-        data = self._get_json(params)
-        if isinstance(data, list):
-            data = data[0] if data else {}
-        assert isinstance(data, dict)
-        self._cache_set(key, data)
-        return data
+        try:
+            data = self._get_json(params)
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            assert isinstance(data, dict)
+            self._cache_set(key, data)
+            return data
+        except WeatherProviderError as exc:
+            logger.warning(
+                "Open-Meteo failed for %s,%s (%s); trying Met.no fallback",
+                g_lat,
+                g_lon,
+                exc,
+            )
+            data = self._fetch_metno_as_open_meteo(g_lat, g_lon)
+            self._cache_set(key, data)
+            return data
+
+    def _fetch_metno_as_open_meteo(self, lat: float, lon: float) -> dict[str, Any]:
+        """
+        Met Norway Locationforecast fallback (free, requires User-Agent).
+
+        Converted into an Open-Meteo-shaped hourly payload so the rest of the
+        pipeline stays unchanged. Used when Open-Meteo rate-limits Render IPs.
+        """
+        self._throttle()
+        try:
+            response = requests.get(
+                "https://api.met.no/weatherapi/locationforecast/2.0/compact",
+                params={"lat": lat, "lon": lon},
+                headers={
+                    "User-Agent": "weather-aware-truck-routing/1.0 github.com/robsen123-fexil/weather-aware-truck-routing",
+                    "Accept": "application/json",
+                },
+                timeout=min(self.timeout, 12),
+            )
+        except requests.RequestException as exc:
+            raise WeatherProviderError(f"Met.no weather request failed: {exc}") from exc
+
+        if response.status_code == 429:
+            self._mark_rate_limited(2.0)
+            raise WeatherProviderError("Weather API rate limit exceeded.", status=429)
+        if response.status_code >= 400:
+            raise WeatherProviderError(
+                f"Met.no weather error ({response.status_code}): {response.text[:200]}",
+                status=502,
+            )
+
+        timeseries = ((response.json().get("properties") or {}).get("timeseries")) or []
+        if not timeseries:
+            raise WeatherProviderError("Met.no returned no forecast timeseries.", status=502)
+
+        times: list[str] = []
+        wind: list[float | None] = []
+        rain: list[float | None] = []
+        snow: list[float | None] = []
+        precip: list[float | None] = []
+
+        for entry in timeseries[:168]:  # ~7 days hourly-ish
+            t = entry.get("time")
+            if not t:
+                continue
+            details = ((entry.get("data") or {}).get("instant") or {}).get("details") or {}
+            next1 = ((entry.get("data") or {}).get("next_1_hours") or {}).get("details") or {}
+            wind_ms = details.get("wind_speed")
+            precip_mm = next1.get("precipitation_amount")
+            # Met.no compact does not always split rain/snow; treat precip as rain proxy.
+            times.append(t.replace("Z", "+00:00") if t.endswith("Z") else t)
+            wind.append(None if wind_ms is None else float(wind_ms) * 2.236936)  # m/s → mph
+            rain_v = None if precip_mm is None else float(precip_mm) * 0.0393701  # mm → in
+            rain.append(rain_v)
+            precip.append(rain_v)
+            snow.append(0.0)
+
+        if not times:
+            raise WeatherProviderError("Met.no timeseries had no usable hours.", status=502)
+
+        return {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly_units": {
+                "wind_speed_10m": "mph",
+                "precipitation": "inch",
+                "rain": "inch",
+                "snowfall": "inch",
+            },
+            "hourly": {
+                "time": times,
+                "wind_speed_10m": wind,
+                "precipitation": precip,
+                "rain": rain,
+                "snowfall": snow,
+            },
+            "source": "met.no",
+        }
 
     def _store_batch_payloads(
         self,
