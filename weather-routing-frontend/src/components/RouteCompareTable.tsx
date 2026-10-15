@@ -27,22 +27,22 @@ export function RouteCompareTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <table className="w-full min-w-[640px] border-collapse text-left text-xs">
         <thead>
-          <tr className="border-b border-slate-100 bg-slate-50/80">
-            <th className="px-3 py-2.5 font-semibold uppercase tracking-wide text-slate-500">Metric</th>
+          <tr className="border-b border-slate-100 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/80">
+            <th className="px-3 py-2.5 font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Metric</th>
             {slots.map((route, i) => (
-              <th key={i} className="px-3 py-2.5 font-semibold text-slate-800">
+              <th key={i} className="px-3 py-2.5 font-semibold text-slate-800 dark:text-slate-100">
                 Route {i + 1}
                 {!route && (
-                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400">Not available</span>
+                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400 dark:text-slate-500">Not available</span>
                 )}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
           <Row label="Status">
             {slots.map((route, i) => {
               if (!route) return <Cell key={i}>—</Cell>
@@ -58,7 +58,7 @@ export function RouteCompareTable({
                       <Badge tone="sky">Selected</Badge>
                     )}
                     {!isRec && !isSel && (
-                      <span className="text-slate-500">Alternative</span>
+                      <span className="text-slate-500 dark:text-slate-400">Alternative</span>
                     )}
                   </div>
                 </Cell>
@@ -152,7 +152,7 @@ export function RouteCompareTable({
                     ? `${c.coverage_percent}% (${c.checkpoints_with_forecast}/${c.checkpoints_total})`
                     : '—'}
                   {incomplete ? (
-                    <span className="mt-0.5 block text-[10px] font-medium text-amber-700">
+                    <span className="mt-0.5 block text-[10px] font-medium text-amber-700 dark:text-amber-300">
                       Incomplete coverage
                     </span>
                   ) : null}
@@ -173,7 +173,7 @@ export function RouteCompareTable({
             })}
           </Row>
           <tr>
-            <td className="px-3 py-2.5 text-slate-500" />
+            <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400" />
             {slots.map((route, i) => (
               <td key={i} className="px-3 py-2.5">
                 {route ? (
@@ -182,8 +182,8 @@ export function RouteCompareTable({
                     onClick={() => onSelect(route.id)}
                     className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition ${
                       selectedRouteId === route.id
-                        ? 'bg-sky-600 text-white'
-                        : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                        ? 'bg-sky-600 text-white dark:bg-sky-500 dark:text-slate-950'
+                        : 'bg-slate-100 text-slate-800 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     {selectedRouteId === route.id ? 'Viewing on map' : 'View on map'}
@@ -195,7 +195,7 @@ export function RouteCompareTable({
         </tbody>
       </table>
       {routes.length < SLOT_COUNT && (
-        <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500">
+        <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {routes.length === 1
             ? 'Only one distinct route was available for this trip.'
             : `Only ${routes.length} distinct routes were available — Route 3 could not be generated.`}
@@ -208,7 +208,7 @@ export function RouteCompareTable({
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <tr>
-      <th className="whitespace-nowrap px-3 py-2 font-medium text-slate-600">{label}</th>
+      <th className="whitespace-nowrap px-3 py-2 font-medium text-slate-600 dark:text-slate-400">{label}</th>
       {children}
     </tr>
   )
@@ -229,9 +229,9 @@ function Cell({
       className={`px-3 py-2 ${
         warn
           ? danger
-            ? 'font-semibold text-red-800'
-            : 'font-semibold text-orange-800'
-          : 'text-slate-800'
+            ? 'font-semibold text-red-800 dark:text-red-300'
+            : 'font-semibold text-orange-800 dark:text-orange-300'
+          : 'text-slate-800 dark:text-slate-200'
       }`}
     >
       {children}
@@ -242,8 +242,8 @@ function Cell({
 function Badge({ children, tone }: { children: ReactNode; tone: 'emerald' | 'sky' }) {
   const cls =
     tone === 'emerald'
-      ? 'bg-emerald-100 text-emerald-800'
-      : 'bg-sky-100 text-sky-800'
+      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
+      : 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200'
   return (
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}>
       {children}

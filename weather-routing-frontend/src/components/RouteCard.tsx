@@ -56,20 +56,20 @@ export function RouteCard({
 
   const safetyClass =
     safety.tone === 'safe'
-      ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+      ? 'bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800'
       : safety.tone === 'caution'
-        ? 'bg-amber-50 text-amber-900 ring-amber-200'
+        ? 'bg-amber-50 text-amber-900 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:ring-amber-800'
         : safety.tone === 'unknown'
-          ? 'bg-slate-100 text-slate-700 ring-slate-200'
-          : 'bg-red-50 text-red-800 ring-red-200'
+          ? 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600'
+          : 'bg-red-50 text-red-800 ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-800'
 
   return (
     <div
       className={`w-full rounded-xl border p-4 transition ${
         isRecommended
-          ? 'border-emerald-300 bg-gradient-to-br from-emerald-50/80 to-white shadow-sm'
-          : 'border-slate-200 bg-white'
-      } ${selected ? 'ring-2 ring-sky-500 ring-offset-1' : ''}`}
+          ? 'border-emerald-300 bg-gradient-to-br from-emerald-50/80 to-white shadow-sm dark:border-emerald-700 dark:from-emerald-950/40 dark:to-slate-900'
+          : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
+      } ${selected ? 'ring-2 ring-sky-500 ring-offset-1 dark:ring-offset-slate-950' : ''}`}
     >
       {/* Header */}
       <div className="mb-3 flex items-start justify-between gap-2">
@@ -81,11 +81,11 @@ export function RouteCard({
           />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-semibold text-slate-900">
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
                 Route {displayNum}
               </p>
               {selected && (
-                <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
+                <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-900/60 dark:text-sky-200">
                   On map
                 </span>
               )}
@@ -100,7 +100,7 @@ export function RouteCard({
                 </span>
               )}
             </div>
-            <p className="truncate text-xs text-slate-500">
+            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
               {routingProfileLabel(route)}
             </p>
           </div>
@@ -129,21 +129,21 @@ export function RouteCard({
       </div>
 
       {/* Weather & risk */}
-      <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50/80 p-2.5">
+      <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/60">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Weather risk miles
           </p>
           {coverage && (
-            <p className="text-[11px] text-slate-600">
-              <strong className="text-slate-900">{coverage.coverage_percent}%</strong> forecast coverage
+            <p className="text-[11px] text-slate-600 dark:text-slate-400">
+              <strong className="text-slate-900 dark:text-slate-100">{coverage.coverage_percent}%</strong> forecast coverage
               {' '}({coverage.checkpoints_with_forecast}/{coverage.checkpoints_total} checkpoints)
             </p>
           )}
         </div>
 
         {rs.has_incomplete_forecast && (
-          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-950">
+          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
             Forecast coverage is incomplete. Safety conclusions apply only to evaluated segments
             {rs.evaluated_miles != null
               ? ` (${rs.evaluated_miles.toFixed(1)} of ${route.distance_miles.toFixed(1)} mi)`
@@ -153,7 +153,7 @@ export function RouteCard({
         )}
 
         {rs.has_no_travel && (
-          <div className="mb-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-red-900">
+          <div className="mb-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
             No Travel hazard on this route
             {rs.no_travel_miles > 0 ? ` · ${rs.no_travel_miles.toFixed(1)} mi` : ''}
             . Not eligible as a safe recommendation.
@@ -172,16 +172,16 @@ export function RouteCard({
             color={riskColor('Unavailable')}
           />
           <div>
-            <p className="text-[10px] uppercase tracking-wide text-slate-500">Avg risk</p>
-            <p className="text-sm font-semibold text-slate-900">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Avg risk</p>
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               {rs.average_risk.toFixed(2)}
-              <span className="ml-1 text-[10px] font-normal text-slate-500">
+              <span className="ml-1 text-[10px] font-normal text-slate-500 dark:text-slate-400">
                 / 4 · {averageRiskMeaning(rs.average_risk)}
               </span>
             </p>
           </div>
         </div>
-        <p className="mt-1.5 text-[10px] leading-snug text-slate-500">
+        <p className="mt-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-400">
           Risk miles classify each traveled segment by the forecast at its ending checkpoint.
           Total distance {route.distance_miles.toFixed(1)} mi
           {rs.evaluated_miles != null
@@ -191,7 +191,7 @@ export function RouteCard({
         </p>
 
         {hasPeakWeather && (
-          <p className="mt-2 border-t border-slate-200/80 pt-2 text-[11px] text-slate-700">
+          <p className="mt-2 border-t border-slate-200/80 pt-2 text-[11px] text-slate-700 dark:border-slate-600 dark:text-slate-300">
             Measured peak:{' '}
             <strong>{formatWeatherValue(ws!.peak_wind_mph, 1, 'mph wind')}</strong>
             {' · '}
@@ -201,7 +201,7 @@ export function RouteCard({
           </p>
         )}
 
-        <div className="mt-2 space-y-1 border-t border-slate-200/80 pt-2 text-xs text-slate-600">
+        <div className="mt-2 space-y-1 border-t border-slate-200/80 pt-2 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-300">
           {rs.highest_risk && peakCp && (
             <p>
               Highest risk encountered:{' '}
@@ -210,7 +210,7 @@ export function RouteCard({
               </span>
               {' '}({checkpointLocationLabel(peakCp)})
               {peakAtZeroMiles && (
-                <span className="text-slate-500">
+                <span className="text-slate-500 dark:text-slate-400">
                   {' '}— this checkpoint contributes 0 risk-miles below because it is the
                   starting point, not a traveled segment. It is still shown so this condition
                   is never hidden.
@@ -220,18 +220,18 @@ export function RouteCard({
           )}
           {severeHighCps > 0 && (
             <p>
-              <span className="font-medium text-orange-700">{severeHighCps}</span> checkpoint
+              <span className="font-medium text-orange-700 dark:text-orange-300">{severeHighCps}</span> checkpoint
               {severeHighCps === 1 ? '' : 's'} with high/severe/no-travel risk
             </p>
           )}
           {unavailableCps > 0 && (
             <p>
-              <span className="font-medium text-slate-800">{unavailableCps}</span> checkpoint
+              <span className="font-medium text-slate-800 dark:text-slate-100">{unavailableCps}</span> checkpoint
               {unavailableCps === 1 ? '' : 's'} without forecast (not counted as Low)
             </p>
           )}
           {noTravelCount > 0 && (
-            <p className="text-red-700">
+            <p className="text-red-700 dark:text-red-300">
               {noTravelCount} No Travel segment{noTravelCount === 1 ? '' : 's'}
               {' '}({rs.no_travel_miles.toFixed(1)} mi)
             </p>
@@ -239,33 +239,33 @@ export function RouteCard({
           {hazards.length > 0 ? (
             <p>
               Main hazards:{' '}
-              <span className="font-medium text-slate-800">{hazards.join(', ')}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{hazards.join(', ')}</span>
             </p>
           ) : coverage && coverage.checkpoints_with_forecast === 0 ? (
             <p>No evaluated weather hazards — forecasts missing.</p>
           ) : rs.highest_risk && rs.highest_risk !== 'Low' ? (
-            <p className="text-amber-700">
+            <p className="text-amber-700 dark:text-amber-300">
               No High or Severe hazards on evaluated segments. A {rs.highest_risk} reading was
               recorded{peakCp ? ` ${checkpointLocationLabel(peakCp)}` : ''} — see above.
             </p>
           ) : (
-            <p className="text-emerald-700">
+            <p className="text-emerald-700 dark:text-emerald-300">
               Confirmed Low conditions on evaluated segments
               {coverage ? ` (${coverage.checkpoints_with_forecast} checkpoints)` : ''}.
             </p>
           )}
           {route.warnings?.length > 0 && (
-            <p className="text-amber-800">{route.warnings.join(' · ')}</p>
+            <p className="text-amber-800 dark:text-amber-200">{route.warnings.join(' · ')}</p>
           )}
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
         <button
           type="button"
           onClick={() => setDetailsOpen((v) => !v)}
-          className="flex items-center gap-1 rounded-md px-1 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-50"
+          className="flex items-center gap-1 rounded-md px-1 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/50"
           aria-expanded={detailsOpen}
         >
           <span className="text-slate-400">{detailsOpen ? '▾' : '▸'}</span>
@@ -277,8 +277,8 @@ export function RouteCard({
           disabled={selected}
           className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
             selected
-              ? 'cursor-default bg-sky-100 text-sky-700'
-              : 'bg-slate-900 text-white hover:bg-slate-800'
+              ? 'cursor-default bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200'
+              : 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400'
           }`}
         >
           {selected ? 'Viewing on map' : 'View on map'}
@@ -296,9 +296,9 @@ export function RouteCard({
 
 function MetricBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-100 bg-white px-2 py-1.5">
-      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-900">{value}</p>
+    <div className="rounded-md border border-slate-100 bg-white px-2 py-1.5 dark:border-slate-700 dark:bg-slate-800/80">
+      <p className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{value}</p>
     </div>
   )
 }
@@ -316,8 +316,8 @@ function RiskMile({
     <div className="flex items-center gap-1.5">
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       <div>
-        <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
-        <p className="text-sm font-semibold text-slate-900">{miles.toFixed(1)} mi</p>
+        <p className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{miles.toFixed(1)} mi</p>
       </div>
     </div>
   )

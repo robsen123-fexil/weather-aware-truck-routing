@@ -9,9 +9,21 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('wr-theme')
+          if (t !== 'dark' && t !== 'light') t = 'dark'
+          document.documentElement.classList.toggle('dark', t === 'dark')
+          document.documentElement.dataset.theme = t
+          document.documentElement.style.colorScheme = t
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+

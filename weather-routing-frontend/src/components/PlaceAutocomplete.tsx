@@ -139,7 +139,7 @@ export function PlaceAutocomplete({
         aria-autocomplete="list"
       />
       {loading && (
-        <span className="pointer-events-none absolute right-3 top-[2.15rem] text-[11px] text-slate-400">
+        <span className="pointer-events-none absolute right-3 top-[2.15rem] text-[11px] text-slate-400 dark:text-slate-500">
           Searching…
         </span>
       )}
@@ -147,7 +147,7 @@ export function PlaceAutocomplete({
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+          className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:shadow-black/40"
         >
           {suggestions.map((item, index) => (
             <li key={`${item.label}-${item.lat}-${item.lon}`}>
@@ -156,14 +156,16 @@ export function PlaceAutocomplete({
                 role="option"
                 aria-selected={index === activeIndex}
                 className={`block w-full px-3 py-2 text-left text-sm ${
-                  index === activeIndex ? 'bg-sky-50 text-sky-900' : 'text-slate-800 hover:bg-slate-50'
+                  index === activeIndex
+                    ? 'bg-sky-50 text-sky-900 dark:bg-sky-950/60 dark:text-sky-100'
+                    : 'text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-700'
                 }`}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(item)}
               >
                 <span className="block font-medium leading-snug">{item.label}</span>
                 {(item.country || item.type) && (
-                  <span className="mt-0.5 block text-[11px] uppercase tracking-wide text-slate-500">
+                  <span className="mt-0.5 block text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {[item.type, item.country].filter(Boolean).join(' · ')}
                   </span>
                 )}

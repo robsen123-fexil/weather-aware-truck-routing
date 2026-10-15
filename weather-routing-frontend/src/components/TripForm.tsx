@@ -212,7 +212,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
             type="button"
             onClick={locate}
             disabled={loading || locationStatus === 'locating'}
-            className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             {locationStatus === 'locating' ? 'Locating…' : 'Use my location'}
           </button>
@@ -221,12 +221,12 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
               type="button"
               onClick={clearDetectedLocation}
               disabled={loading}
-              className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
             >
               Not my location
             </button>
           )}
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
             {locationStatus === 'idle' && 'Tip: typing your city is more reliable than GPS on desktop'}
             {locationStatus === 'ok' && usingGpsOrigin && 'Detected by browser GPS / Windows Location'}
             {locationStatus === 'denied' && 'Location permission denied — type your city instead'}
@@ -235,12 +235,12 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
           </span>
         </div>
         {locationWarning && (
-          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-900">
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
             {locationWarning}
           </p>
         )}
         {usingGpsOrigin && detected && (
-          <p className="mt-1 text-[11px] text-slate-500">
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Using your detected location
             {detected.accuracyM != null ? ` (±${Math.round(detected.accuracyM)} m)` : ''}.
           </p>
@@ -268,7 +268,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
               setDepartureLocal(nowLocalInputValue())
             }}
             disabled={loading}
-            className="text-[11px] font-medium text-sky-700 hover:underline disabled:opacity-50"
+            className="text-[11px] font-medium text-sky-700 hover:underline disabled:opacity-50 dark:text-sky-400"
           >
             Use exact now
           </button>
@@ -285,7 +285,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
           required
           disabled={loading}
         />
-        <p className="mt-1 text-[11px] text-slate-500">
+        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
           {departureLockedToNow
             ? `Live local time (${Intl.DateTimeFormat().resolvedOptions().timeZone})`
             : 'Custom departure (manual)'}
@@ -318,8 +318,8 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
               onClick={() => setIntervalMiles(miles)}
               className={`flex-1 rounded-md border px-2 py-2 text-sm font-medium transition ${
                 interval === miles
-                  ? 'border-sky-600 bg-sky-600 text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+                  ? 'border-sky-600 bg-sky-600 text-white dark:border-sky-500 dark:bg-sky-500 dark:text-slate-950'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-500'
               }`}
             >
               {miles} mi
@@ -329,7 +329,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       </div>
 
       {formError && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-[12px] text-red-800">
+        <p className="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-[12px] text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
           {formError}
         </p>
       )}
@@ -337,7 +337,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       <button
         type="submit"
         disabled={loading || !origin.trim() || !destination.trim()}
-        className="w-full rounded-md bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-md bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400"
       >
         {loading ? 'Analyzing trip…' : 'Compare routes'}
       </button>

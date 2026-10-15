@@ -625,7 +625,7 @@ export function RouteMap({
   const empty = !loading && !hasRoutes
 
   return (
-    <div className="relative h-full min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+    <div className="relative h-full min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-900">
       <div ref={containerRef} className="h-full w-full" />
 
       <WeatherHeatmap
@@ -638,8 +638,8 @@ export function RouteMap({
 
       {/* Map controls */}
       {hasRoutes && (
-        <div className="absolute top-3 left-3 z-10 flex max-w-[220px] flex-col gap-1.5">
-          <div className="rounded-lg border border-slate-200 bg-white/95 p-1.5 shadow-sm">
+        <div className="pointer-events-none absolute top-3 left-3 z-10 flex max-w-[220px] flex-col gap-1.5">
+          <div className="pointer-events-auto rounded-lg border border-slate-200 bg-white/95 p-1.5 shadow-sm dark:border-slate-600 dark:bg-slate-900/95">
             <div className="grid grid-cols-2 gap-1">
               <MapBtn onClick={() => fitToRoute(selectedRouteId)} title="Fit selected route">
                 Fit route
@@ -666,7 +666,7 @@ export function RouteMap({
                 Center
               </MapBtn>
             </div>
-            <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1">
+            <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1 dark:border-slate-700">
               <MapBtn
                 active={showAlternatives}
                 onClick={() => setShowAlternatives((v) => !v)}
@@ -687,26 +687,26 @@ export function RouteMap({
       )}
 
       {/* Legend — collapsed to a small toggle by default so it never covers the map on small screens */}
-      <div className="absolute bottom-3 left-3 z-10 max-w-[280px]">
+      <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[280px]">
         {legendOpen ? (
-          <div className="max-h-[min(60vh,360px)] overflow-y-auto rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-sm">
+          <div className="pointer-events-auto max-h-[min(60vh,360px)] overflow-y-auto rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-sm dark:border-slate-600 dark:bg-slate-900/95 dark:text-slate-200">
             <div className="mb-1.5 flex items-center justify-between gap-2">
-              <p className="font-semibold text-slate-700">Map legend</p>
+              <p className="font-semibold text-slate-700 dark:text-slate-100">Map legend</p>
               <button
                 type="button"
                 onClick={() => setLegendOpen(false)}
-                className="rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100"
+                className="rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                 aria-label="Close legend"
               >
                 Close ✕
               </button>
             </div>
-            <div className="mb-2 space-y-1 text-slate-600">
+            <div className="mb-2 space-y-1 text-slate-600 dark:text-slate-300">
               <LegendLine color="#0284c7" label="Selected route (viewing)" solid />
               <LegendLine color="#059669" label="Recommended route" solid />
               <LegendLine color="#7c3aed" label="Other alternatives" dashed />
               <div className="flex items-center gap-2">
-                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded bg-slate-900 px-1 text-[9px] font-bold text-white">A</span>
+                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded bg-slate-900 px-1 text-[9px] font-bold text-white dark:bg-slate-100 dark:text-slate-900">A</span>
                 Origin (start)
               </div>
               <div className="flex items-center gap-2">
@@ -714,19 +714,19 @@ export function RouteMap({
                 Destination (end)
               </div>
             </div>
-            <p className="mb-1 font-semibold text-slate-700">Corridor forecast dots</p>
-            <p className="mb-2 text-[11px] leading-snug text-slate-500">
+            <p className="mb-1 font-semibold text-slate-700 dark:text-slate-100">Corridor forecast dots</p>
+            <p className="mb-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
               Larger colored circles = weather at the selected forecast hour along the corridor
               (not the truck ETA checkpoint risk on route cards).
             </p>
             {heatmapOverlay === 'risk' ? (
               <>
-                <p className="mb-1 font-semibold text-slate-700">Overlay · combined risk</p>
+                <p className="mb-1 font-semibold text-slate-700 dark:text-slate-100">Overlay · combined risk</p>
                 <div className="mb-2 flex flex-wrap gap-x-2 gap-y-1">
                   {(['Low', 'Moderate', 'High', 'Severe', 'No Travel', 'Unavailable'] as const).map((label) => (
-                    <span key={label} className="inline-flex items-center gap-1 text-slate-600">
+                    <span key={label} className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
                       <span
-                        className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white"
+                        className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-slate-800"
                         style={{ backgroundColor: riskColor(label) }}
                       />
                       {label}
@@ -736,10 +736,10 @@ export function RouteMap({
               </>
             ) : (
               <>
-                <p className="mb-1 font-semibold text-slate-700">
+                <p className="mb-1 font-semibold text-slate-700 dark:text-slate-100">
                   Overlay · {heatmapOverlay === 'wind' ? 'wind (mph)' : heatmapOverlay === 'rain' ? 'rain (in/hr)' : 'snow (in/hr)'}
                 </p>
-                <div className="mb-2 space-y-1 text-slate-600">
+                <div className="mb-2 space-y-1 text-slate-600 dark:text-slate-300">
                   {(heatmapOverlay === 'wind'
                     ? [
                         { color: '#22c55e', label: '< 25' },
@@ -766,7 +766,7 @@ export function RouteMap({
                   ).map((band) => (
                     <span key={band.label} className="mr-2 inline-flex items-center gap-1">
                       <span
-                        className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white"
+                        className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-slate-800"
                         style={{ backgroundColor: band.color }}
                       />
                       {band.label}
@@ -774,7 +774,7 @@ export function RouteMap({
                   ))}
                   <span className="inline-flex items-center gap-1">
                     <span
-                      className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white"
+                      className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-slate-800"
                       style={{ backgroundColor: riskColor('Unavailable') }}
                     />
                     Unavailable
@@ -782,12 +782,12 @@ export function RouteMap({
                 </div>
               </>
             )}
-            <p className="mb-1 font-semibold text-slate-700">Checkpoint risk (ETA-matched)</p>
+            <p className="mb-1 font-semibold text-slate-700 dark:text-slate-100">Checkpoint risk (ETA-matched)</p>
             <div className="flex flex-wrap gap-x-2 gap-y-1">
               {(['Low', 'Moderate', 'High', 'Severe', 'No Travel', 'Unavailable'] as const).map((label) => (
-                <span key={label} className="inline-flex items-center gap-1 text-slate-600">
+                <span key={label} className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
                   <span
-                    className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white"
+                    className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-slate-800"
                     style={{ backgroundColor: riskColor(label) }}
                   />
                   {label}
@@ -799,11 +799,11 @@ export function RouteMap({
           <button
             type="button"
             onClick={() => setLegendOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-white"
+            className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-white dark:border-slate-600 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800"
             aria-label="Show map legend"
           >
             <span
-              className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white"
+              className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-slate-800"
               style={{ backgroundColor: riskColor('Low') }}
             />
             Legend
@@ -813,8 +813,8 @@ export function RouteMap({
 
       {/* Empty / loading / error overlays */}
       {loading && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-100/70 backdrop-blur-[1px]">
-          <div className="flex items-center gap-3 rounded-lg border border-sky-200 bg-white px-4 py-3 text-sm text-sky-900 shadow">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-100/70 backdrop-blur-[1px] dark:bg-slate-950/70">
+          <div className="flex items-center gap-3 rounded-lg border border-sky-200 bg-white px-4 py-3 text-sm text-sky-900 shadow dark:border-sky-800 dark:bg-slate-900 dark:text-sky-100">
             <span className="spinner" aria-hidden />
             Drawing weather-aware routes…
           </div>
@@ -823,9 +823,9 @@ export function RouteMap({
 
       {empty && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <div className="mx-6 max-w-sm rounded-xl border border-dashed border-slate-300 bg-white/90 px-5 py-6 text-center shadow-sm">
-            <p className="text-sm font-semibold text-slate-800">No route on the map yet</p>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+          <div className="mx-6 max-w-sm rounded-xl border border-dashed border-slate-300 bg-white/90 px-5 py-6 text-center shadow-sm dark:border-slate-600 dark:bg-slate-900/90">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No route on the map yet</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
               Analyze a trip to draw the recommended road path, alternatives, and weather checkpoints.
             </p>
           </div>
@@ -833,7 +833,7 @@ export function RouteMap({
       )}
 
       {geometryError && (
-        <div className="absolute top-3 right-3 left-3 z-20 mx-auto max-w-md rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 shadow sm:left-auto">
+        <div className="absolute top-3 right-3 left-3 z-20 mx-auto max-w-md rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 shadow sm:left-auto dark:border-red-800 dark:bg-red-950/50 dark:text-red-200">
           {geometryError}
         </div>
       )}
@@ -862,8 +862,8 @@ function MapBtn({
       onClick={onClick}
       className={`rounded px-2 py-1.5 text-[11px] font-medium transition disabled:opacity-40 ${
         active
-          ? 'bg-slate-900 text-white'
-          : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+          ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-slate-950'
+          : 'bg-slate-50 text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
       }`}
     >
       {children}

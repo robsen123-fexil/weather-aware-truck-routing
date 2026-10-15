@@ -12,13 +12,13 @@ export function CheckpointPopupContent({ checkpoint }: CheckpointPopupProps) {
   const overall = risk?.overall_risk ?? (available ? 'Low' : 'Unavailable')
 
   return (
-    <div className="min-w-[220px] max-w-[280px] p-1 text-slate-800">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <div className="min-w-[220px] max-w-[280px] p-1 text-slate-800 dark:text-slate-100">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         Checkpoint {checkpoint.index}
         {checkpoint.is_origin ? ' · Origin' : ''}
         {checkpoint.is_destination ? ' · Destination' : ''}
       </p>
-      <p className="font-mono text-xs text-slate-600">
+      <p className="font-mono text-xs text-slate-600 dark:text-slate-400">
         {coordinates.lat.toFixed(4)}, {coordinates.lon.toFixed(4)}
       </p>
       <dl className="mt-2 space-y-1 text-xs">
@@ -52,20 +52,20 @@ export function CheckpointPopupContent({ checkpoint }: CheckpointPopupProps) {
             />
           </>
         ) : (
-          <p className="rounded bg-slate-100 px-2 py-1.5 text-[11px] text-slate-700">
+          <p className="rounded bg-slate-100 px-2 py-1.5 text-[11px] text-slate-700 dark:bg-slate-950 dark:text-slate-300">
             Forecast unavailable — not evaluated as Low.
             {weather?.notes ? ` ${weather.notes}` : ''}
           </p>
         )}
-        <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-1">
-          <dt className="text-slate-500">Overall risk</dt>
+        <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-1 dark:border-slate-600">
+          <dt className="text-slate-500 dark:text-slate-400">Overall risk</dt>
           <dd className="font-semibold" style={{ color: riskColor(overall) }}>
             {overall}
           </dd>
         </div>
       </dl>
       {risk?.primary_hazard && (
-        <p className="mt-2 text-[11px] leading-snug text-slate-500">{risk.primary_hazard}</p>
+        <p className="mt-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{risk.primary_hazard}</p>
       )}
     </div>
   )
@@ -74,8 +74,8 @@ export function CheckpointPopupContent({ checkpoint }: CheckpointPopupProps) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-3">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="text-right font-medium text-slate-800">{value}</dd>
+      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
+      <dd className="text-right font-medium text-slate-800 dark:text-slate-100">{value}</dd>
     </div>
   )
 }
@@ -106,42 +106,42 @@ export function checkpointPopupHtml(checkpoint: Checkpoint): string {
     : 'n/a'
 
   const forecastRow = weather?.forecast_time
-    ? `<div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Forecast hour</span><strong>${esc(formatEta(weather.forecast_time))}${
+    ? `<div class="cp-popup__row"><span class="cp-popup__label">Forecast hour</span><strong>${esc(formatEta(weather.forecast_time))}${
       weather.forecast_delta_minutes != null
         ? ` (Δ ${weather.forecast_delta_minutes} min)`
         : ''
     }</strong></div>`
-    : `<div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Forecast hour</span><strong>n/a</strong></div>`
+    : `<div class="cp-popup__row"><span class="cp-popup__label">Forecast hour</span><strong>n/a</strong></div>`
 
   const body = available
     ? `
-        <div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Wind</span><strong>${esc(wind)}</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Rain</span><strong>${esc(rain)}</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Snow</span><strong>${esc(snow)}</strong></div>
+        <div class="cp-popup__row"><span class="cp-popup__label">Wind</span><strong>${esc(wind)}</strong></div>
+        <div class="cp-popup__row"><span class="cp-popup__label">Rain</span><strong>${esc(rain)}</strong></div>
+        <div class="cp-popup__row"><span class="cp-popup__label">Snow</span><strong>${esc(snow)}</strong></div>
       `
-    : `<p style="margin:0;padding:6px 8px;background:#f1f5f9;border-radius:6px;font-size:11px;color:#334155">Forecast unavailable — not evaluated as Low.${
+    : `<p class="cp-popup__unavailable">Forecast unavailable — not evaluated as Low.${
       weather?.notes ? ` ${esc(weather.notes)}` : ''
     }</p>`
 
   const hazard = risk?.primary_hazard
-    ? `<p style="margin:8px 0 0;font-size:11px;color:#64748b;line-height:1.35">${esc(risk.primary_hazard)}</p>`
+    ? `<p class="cp-popup__hazard">${esc(risk.primary_hazard)}</p>`
     : ''
 
   return `
-    <div style="font-family:IBM Plex Sans,sans-serif;min-width:220px;max-width:280px;color:#1e293b">
-      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#64748b;margin-bottom:4px">
+    <div class="cp-popup">
+      <div class="cp-popup__eyebrow">
         Checkpoint ${checkpoint.index}${checkpoint.is_origin ? ' · Origin' : ''}${checkpoint.is_destination ? ' · Destination' : ''}
       </div>
-      <div style="font-family:IBM Plex Mono,monospace;font-size:11px;color:#475569">
+      <div class="cp-popup__coords">
         ${coordinates.lat.toFixed(4)}, ${coordinates.lon.toFixed(4)}
       </div>
-      <div style="margin-top:8px;font-size:12px;display:grid;gap:4px">
-        <div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Distance</span><strong>${checkpoint.distance_from_origin_miles.toFixed(1)} mi</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:12px"><span style="color:#64748b">Truck ETA</span><strong>${esc(formatEta(checkpoint.eta))}</strong></div>
+      <div class="cp-popup__grid">
+        <div class="cp-popup__row"><span class="cp-popup__label">Distance</span><strong>${checkpoint.distance_from_origin_miles.toFixed(1)} mi</strong></div>
+        <div class="cp-popup__row"><span class="cp-popup__label">Truck ETA</span><strong>${esc(formatEta(checkpoint.eta))}</strong></div>
         ${forecastRow}
         ${body}
-        <div style="display:flex;justify-content:space-between;gap:12px;border-top:1px solid #e2e8f0;padding-top:4px">
-          <span style="color:#64748b">Overall risk</span>
+        <div class="cp-popup__row cp-popup__divider">
+          <span class="cp-popup__label">Overall risk</span>
           <strong style="color:${color}">${esc(overall)}</strong>
         </div>
       </div>
