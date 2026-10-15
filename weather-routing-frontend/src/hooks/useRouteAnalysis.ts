@@ -27,17 +27,19 @@ async function loadCorridorForecast(
   routeId: string | null,
   signal: AbortSignal,
 ): Promise<CorridorForecastResponse | null> {
+  // Always seed from the *selected* route so the corridor dots follow the path
+  // the user is reviewing — never stick to the one-shot analysis heatmap seed.
   const route =
     result.routes.find((r) => r.id === routeId)
     ?? result.routes.find((r) => r.id === result.recommendation.recommended_route_id)
     ?? result.routes[0]
 
   const seed =
-    result.heatmap_seed_points
-    ?? route?.checkpoints.map((c) => ({
+    route?.checkpoints.map((c) => ({
       lat: c.coordinates.lat,
       lon: c.coordinates.lon,
     }))
+    ?? result.heatmap_seed_points
     ?? []
 
   if (seed.length === 0) return null

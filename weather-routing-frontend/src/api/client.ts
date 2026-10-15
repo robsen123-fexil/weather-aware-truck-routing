@@ -42,8 +42,15 @@ export async function apiRequest<T>(
       },
     })
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw err
+    // Aborts (route change / HMR / new analyze) must not look like offline errors.
+    if (
+      (err instanceof DOMException && err.name === 'AbortError')
+      || (err instanceof Error && err.name === 'AbortError')
+      || options.signal?.aborted
+    ) {
+      throw err instanceof DOMException
+        ? err
+        : new DOMException('The operation was aborted.', 'AbortError')
     }
     throw new ApiError(
       'Network request failed',

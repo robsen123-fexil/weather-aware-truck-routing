@@ -10,7 +10,13 @@ export function userFacingError(err: unknown): string {
       return 'Please check the origin, destination, and departure time, then try again.'
     }
     if (err.status === 429) {
-      return 'Too many requests. Please wait a moment and try again.'
+      return 'Place lookup is busy right now. Wait a few seconds, pick a suggestion from the list, then try again.'
+    }
+    if (err.code === 'geocoding_error') {
+      if (/rate.?limit|busy|temporarily/i.test(err.message)) {
+        return 'Place lookup is busy right now. Wait a few seconds, pick a suggestion from the list, then try again.'
+      }
+      return err.message || 'We could not resolve that place name. Try another spelling or pick a suggestion.'
     }
     if (err.status === 503 || err.code === 'routing_error') {
       return 'Route planning is temporarily unavailable. Try again in a few minutes.'

@@ -17,7 +17,6 @@ export function Dashboard() {
     data,
     selectedRoute,
     selectedRouteId,
-    setSelectedRouteId,
     selectRoute,
     forecast,
     forecastHour,
@@ -165,7 +164,7 @@ export function Dashboard() {
                   heatmapOverlay={overlay}
                   loading={loading}
                   fitGeneration={fitGeneration}
-                  onSelectRoute={setSelectedRouteId}
+                  onSelectRoute={(id) => selectRoute(id, { fit: true })}
                   onSelectRecommended={() => {
                     if (recommendedId) selectRoute(recommendedId, { fit: true })
                   }}

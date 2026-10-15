@@ -14,6 +14,17 @@ from shared.exceptions import GeocodingError, RoutingError, ValidationAppError
 
 logger = logging.getLogger(__name__)
 
+# Process-wide geocode / suggest caches — cuts Nominatim 429s from autocomplete + analyze.
+_GEOCODE_CACHE: dict[str, dict[str, Any]] = {}
+_SUGGEST_CACHE: dict[str, list[dict[str, Any]]] = {}
+_CACHE_MAX = 256
+
+
+def _cache_put(cache: dict[str, Any], key: str, value: Any) -> None:
+    if len(cache) >= _CACHE_MAX:
+        cache.pop(next(iter(cache)), None)
+    cache[key] = value
+
 
 class RoutingService:
     def __init__(self) -> None:
@@ -64,15 +75,51 @@ class RoutingService:
                 except ValueError:
                     pass
 
-        # Nominatim first (reliable, no key); ORS as secondary.
-        try:
-            return self._geocode_nominatim(place)
-        except (GeocodingError, requests.RequestException) as exc:
-            logger.warning("Nominatim geocoding failed (%s); trying ORS", exc)
+        cache_key = place.casefold()
+        cached = _GEOCODE_CACHE.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
+        # Prefer ORS when keyed — Nominatim public API rate-limits hard (429)
+        # after autocomplete traffic. Fall back the other way if needed.
+        errors: list[str] = []
+        if self.api_key:
             try:
-                return self._geocode_ors(place)
-            except (GeocodingError, requests.RequestException) as ors_exc:
-                raise GeocodingError(str(ors_exc)) from ors_exc
+                result = self._geocode_ors(place)
+                _cache_put(_GEOCODE_CACHE, cache_key, result)
+                return result
+            except (GeocodingError, requests.RequestException) as exc:
+                errors.append(f"ORS: {exc}")
+                logger.warning("ORS geocoding failed (%s); trying Nominatim", exc)
+
+        try:
+            result = self._geocode_nominatim(place)
+            _cache_put(_GEOCODE_CACHE, cache_key, result)
+            return result
+        except (GeocodingError, requests.RequestException) as exc:
+            errors.append(f"Nominatim: {exc}")
+            logger.warning("Nominatim geocoding failed (%s)", exc)
+            if self.api_key:
+                # Already tried ORS first; no further fallback.
+                pass
+            else:
+                try:
+                    result = self._geocode_ors(place)
+                    _cache_put(_GEOCODE_CACHE, cache_key, result)
+                    return result
+                except (GeocodingError, requests.RequestException) as ors_exc:
+                    errors.append(f"ORS: {ors_exc}")
+
+        # Prefer surfacing rate-limit clearly when that is what happened.
+        joined = " | ".join(errors) if errors else "Geocoding failed."
+        status = 429 if "429" in joined or "rate limit" in joined.lower() else 502
+        raise GeocodingError(
+            "Place lookup is temporarily rate-limited. Wait a moment, or pick a "
+            "suggestion again so we can use saved coordinates."
+            if status == 429
+            else f"Could not resolve '{place}'.",
+            status=status,
+        )
 
     def _geocode_ors(self, place: str) -> dict[str, Any]:
         url = f"{self.base}/geocode/search"
@@ -86,7 +133,7 @@ class RoutingService:
             raise GeocodingError("Geocoding rate limit exceeded. Try again shortly.", status=429)
         if response.status_code >= 400:
             raise GeocodingError(
-                f"Geocoding failed ({response.status_code}): {response.text[:300]}",
+                f"Geocoding failed ({response.status_code}): {response.text[:200]}",
                 status=502,
             )
 
@@ -111,15 +158,20 @@ class RoutingService:
             response = requests.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": place, "format": "json", "limit": 1},
-                headers={"User-Agent": "weather-aware-truck-routing/1.0"},
+                headers={"User-Agent": "weather-aware-truck-routing/1.0 (contact: local-dev)"},
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:
             raise GeocodingError(f"Geocoding request failed: {exc}") from exc
 
+        if response.status_code == 429:
+            raise GeocodingError(
+                "Geocoding rate limit exceeded. Try again shortly.",
+                status=429,
+            )
         if response.status_code >= 400:
             raise GeocodingError(
-                f"Geocoding failed ({response.status_code}): {response.text[:300]}",
+                f"Geocoding failed ({response.status_code})",
                 status=502,
             )
 
@@ -217,6 +269,11 @@ class RoutingService:
             return []
 
         limit = max(1, min(int(limit), 10))
+        cache_key = f"{query.casefold()}|{limit}"
+        cached = _SUGGEST_CACHE.get(cache_key)
+        if cached is not None:
+            return [dict(item) for item in cached]
+
         try:
             response = requests.get(
                 "https://nominatim.openstreetmap.org/search",
@@ -226,9 +283,12 @@ class RoutingService:
                     "addressdetails": 1,
                     "limit": limit,
                 },
-                headers={"User-Agent": "weather-aware-truck-routing/1.0"},
+                headers={"User-Agent": "weather-aware-truck-routing/1.0 (contact: local-dev)"},
                 timeout=min(self.timeout, 12),
             )
+            if response.status_code == 429:
+                logger.warning("Place suggest rate-limited by Nominatim")
+                return []
             response.raise_for_status()
             results = response.json() or []
         except requests.RequestException as exc:
@@ -260,7 +320,8 @@ class RoutingService:
                     "source": "nominatim",
                 }
             )
-        return suggestions
+        _cache_put(_SUGGEST_CACHE, cache_key, suggestions)
+        return [dict(item) for item in suggestions]
 
     @staticmethod
     def _approx_distance_m(origin: dict[str, Any], destination: dict[str, Any]) -> float:

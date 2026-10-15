@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { reverseGeocode } from '../api/places'
+import { reverseGeocode, type PlaceSuggestion } from '../api/places'
 import type { AnalyzeRoutesRequest, CheckpointInterval } from '../types/routing'
 import { PlaceAutocomplete } from './PlaceAutocomplete'
 
@@ -34,6 +34,9 @@ const GEO_OPTIONS: PositionOptions = {
 export function TripForm({ loading, onSubmit }: TripFormProps) {
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
+  /** Saved lat/lon from autocomplete (or GPS) so analyze skips Nominatim geocode. */
+  const [originCoords, setOriginCoords] = useState<{ lat: number; lon: number } | null>(null)
+  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [departureLocal, setDepartureLocal] = useState(() => nowLocalInputValue())
   const [loadWeight, setLoadWeight] = useState(35000)
   const [interval, setIntervalMiles] = useState<CheckpointInterval>(25)
@@ -58,6 +61,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     setLocationWarning(null)
     setLocationStatus('idle')
     setOrigin('')
+    setOriginCoords(null)
   }
 
   const applyPosition = async (pos: GeolocationPosition) => {
@@ -76,6 +80,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     setDetected({ lat, lon, accuracyM, label })
     setUsingGpsOrigin(true)
     setOrigin(label)
+    setOriginCoords({ lat, lon })
     setLocationStatus('ok')
 
     // Browser often returns wrong country via IP/network location (± hundreds of meters+).
@@ -118,6 +123,26 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     setLocationWarning(null)
     setLocationStatus('idle')
     setOrigin(value)
+    setOriginCoords(null)
+  }
+
+  const handleDestinationChange = (value: string) => {
+    setDestination(value)
+    setDestinationCoords(null)
+  }
+
+  const handleOriginSelect = (place: PlaceSuggestion) => {
+    setUsingGpsOrigin(false)
+    setDetected(null)
+    setLocationWarning(null)
+    setLocationStatus('idle')
+    setOrigin(place.label)
+    setOriginCoords({ lat: place.lat, lon: place.lon })
+  }
+
+  const handleDestinationSelect = (place: PlaceSuggestion) => {
+    setDestination(place.label)
+    setDestinationCoords({ lat: place.lat, lon: place.lon })
   }
 
   const handleSubmit = (e: FormEvent) => {
@@ -145,15 +170,22 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       return
     }
 
-    // Only send GPS coords when the user kept the detected origin.
+    // Prefer lat,lon so the backend skips Nominatim (avoids 429 after autocomplete).
     let originValue = origin.trim()
-    if (usingGpsOrigin && detected) {
+    if (originCoords) {
+      originValue = coordsString(originCoords.lat, originCoords.lon)
+    } else if (usingGpsOrigin && detected) {
       originValue = coordsString(detected.lat, detected.lon)
+    }
+
+    let destinationValue = destination.trim()
+    if (destinationCoords) {
+      destinationValue = coordsString(destinationCoords.lat, destinationCoords.lon)
     }
 
     onSubmit({
       origin: originValue,
-      destination: destination.trim(),
+      destination: destinationValue,
       departure: departure.toISOString(),
       load_weight_lb: weight,
       checkpoint_interval_miles: interval,
@@ -169,6 +201,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
           label="Origin"
           value={origin}
           onChange={handleOriginChange}
+          onSelectPlace={handleOriginSelect}
           required
           disabled={loading}
           placeholder="Type your city (e.g. Riyadh, Cairo, Istanbul)…"
@@ -217,8 +250,9 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       <PlaceAutocomplete
         id="destination"
         label="Destination"
+        onSelectPlace={handleDestinationSelect}
         value={destination}
-        onChange={setDestination}
+        onChange={handleDestinationChange}
         required
         disabled={loading}
         placeholder="Type destination city…"

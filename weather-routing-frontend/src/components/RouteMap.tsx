@@ -326,9 +326,13 @@ export function RouteMap({
       const isSelected = route.id === selectedRouteId
       const isRecommended = route.id === recommendedRouteId
       const isAlt = !isRecommended
-      const color = isRecommended
-        ? '#059669'
-        : ROUTE_LINE_COLORS[index % ROUTE_LINE_COLORS.length]!
+      // Selected path is always sky-blue so the chosen route is obvious even when
+      // it is not the recommended (green) alternative.
+      const color = isSelected
+        ? '#0284c7'
+        : isRecommended
+          ? '#059669'
+          : ROUTE_LINE_COLORS[index % ROUTE_LINE_COLORS.length]!
 
       const visible = showAlternatives || isSelected || isRecommended
 
@@ -373,7 +377,7 @@ export function RouteMap({
         },
         paint: {
           'line-color': color,
-          'line-width': isSelected ? 6.5 : isRecommended ? 5.5 : 3,
+          'line-width': isSelected ? 7 : isRecommended ? 5.5 : 3,
           'line-opacity': isSelected ? 1 : isRecommended ? 0.92 : 0.38,
           'line-dasharray': isAlt && !isSelected ? [1.2, 1.6] : [1, 0],
         },
@@ -539,18 +543,24 @@ export function RouteMap({
       const isAlt = !isRecommended
       const visible = showAlternatives || isSelected || isRecommended
       const vis = visible ? 'visible' : 'none'
+      const color = isSelected
+        ? '#0284c7'
+        : isRecommended
+          ? '#059669'
+          : ROUTE_LINE_COLORS[index % ROUTE_LINE_COLORS.length]!
 
       map.setLayoutProperty(lineId, 'visibility', vis)
       map.setLayoutProperty(casingId, 'visibility', vis)
       map.setLayoutProperty(hitId, 'visibility', vis)
 
-      map.setPaintProperty(lineId, 'line-width', isSelected ? 6.5 : isRecommended ? 5.5 : 3)
+      map.setPaintProperty(lineId, 'line-color', color)
+      map.setPaintProperty(lineId, 'line-width', isSelected ? 7 : isRecommended ? 5.5 : 3)
       map.setPaintProperty(lineId, 'line-opacity', isSelected ? 1 : isRecommended ? 0.92 : 0.38)
       map.setPaintProperty(lineId, 'line-dasharray', isAlt && !isSelected ? [1.2, 1.6] : [1, 0])
       map.setPaintProperty(casingId, 'line-width', isSelected || isRecommended ? 10 : 6)
       map.setPaintProperty(casingId, 'line-opacity', isSelected || isRecommended ? 0.9 : 0.35)
 
-      // Raise selected route layers to top
+      // Raise selected route layers to top (under heatmap/checkpoints)
       if (isSelected) {
         try {
           map.moveLayer(casingId)
@@ -640,9 +650,8 @@ export function RouteMap({
               <MapBtn
                 onClick={() => {
                   if (recommendedRouteId) {
-                    onSelectRoute(recommendedRouteId)
                     onSelectRecommended?.()
-                    window.setTimeout(() => fitToRoute(recommendedRouteId), 50)
+                    onSelectRoute(recommendedRouteId)
                   }
                 }}
                 title="Select recommended route"
@@ -693,8 +702,9 @@ export function RouteMap({
               </button>
             </div>
             <div className="mb-2 space-y-1 text-slate-600">
+              <LegendLine color="#0284c7" label="Selected route (viewing)" solid />
               <LegendLine color="#059669" label="Recommended route" solid />
-              <LegendLine color="#7c3aed" label="Alternative routes" dashed />
+              <LegendLine color="#7c3aed" label="Other alternatives" dashed />
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded bg-slate-900 px-1 text-[9px] font-bold text-white">A</span>
                 Origin (start)

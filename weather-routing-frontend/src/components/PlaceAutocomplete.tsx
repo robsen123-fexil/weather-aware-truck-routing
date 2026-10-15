@@ -6,6 +6,8 @@ interface PlaceAutocompleteProps {
   label: string
   value: string
   onChange: (value: string) => void
+  /** Called when the user picks a suggestion — includes lat/lon so analyze can skip geocode. */
+  onSelectPlace?: (place: PlaceSuggestion) => void
   placeholder?: string
   disabled?: boolean
   required?: boolean
@@ -22,6 +24,7 @@ export function PlaceAutocomplete({
   label,
   value,
   onChange,
+  onSelectPlace,
   placeholder = 'Start typing a city or country…',
   disabled,
   required,
@@ -53,8 +56,9 @@ export function PlaceAutocomplete({
 
     let cancelled = false
     setLoading(true)
+    // Longer debounce — Nominatim bans clients that type-ahead too aggressively.
     const timer = window.setTimeout(() => {
-      suggestPlaces(q, 6)
+      suggestPlaces(q, 5)
         .then((res) => {
           if (cancelled) return
           setSuggestions(res.suggestions)
@@ -69,7 +73,7 @@ export function PlaceAutocomplete({
         .finally(() => {
           if (!cancelled) setLoading(false)
         })
-    }, 350)
+    }, 550)
 
     return () => {
       cancelled = true
@@ -90,6 +94,7 @@ export function PlaceAutocomplete({
   const pick = (item: PlaceSuggestion) => {
     skipFetchRef.current = true
     onChange(item.label)
+    onSelectPlace?.(item)
     setSuggestions([])
     setOpen(false)
     setActiveIndex(-1)
