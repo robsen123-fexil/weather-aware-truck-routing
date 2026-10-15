@@ -89,16 +89,18 @@ class WeatherService:
             _FORECAST_CACHE[key] = data
 
     def _throttle(self) -> None:
+        """Serialize Open-Meteo calls without holding the lock while sleeping."""
         global _LAST_HTTP_AT, _RATE_LIMIT_COOLDOWN_S
-        with _HTTP_LOCK:
-            now = time.monotonic()
-            if _RATE_LIMIT_COOLDOWN_S > now:
-                time.sleep(_RATE_LIMIT_COOLDOWN_S - now)
+        while True:
+            with _HTTP_LOCK:
                 now = time.monotonic()
-            wait = _MIN_HTTP_GAP_S - (now - _LAST_HTTP_AT)
-            if wait > 0:
-                time.sleep(wait)
-            _LAST_HTTP_AT = time.monotonic()
+                cooldown = max(0.0, _RATE_LIMIT_COOLDOWN_S - now)
+                gap = max(0.0, _MIN_HTTP_GAP_S - (now - _LAST_HTTP_AT))
+                wait = max(cooldown, gap)
+                if wait <= 0:
+                    _LAST_HTTP_AT = time.monotonic()
+                    return
+            time.sleep(min(wait, 1.0))
 
     def _mark_rate_limited(self, seconds: float = 8.0) -> None:
         global _RATE_LIMIT_COOLDOWN_S
@@ -118,26 +120,25 @@ class WeatherService:
             params["apikey"] = self.api_key
         return params
 
-    def _get_json(self, params: dict[str, Any], *, retries: int = 5) -> dict[str, Any] | list[Any]:
+    def _get_json(self, params: dict[str, Any], *, retries: int = 2) -> dict[str, Any] | list[Any]:
         url = f"{self.base_url}/forecast"
         last_exc: Exception | None = None
         for attempt in range(retries + 1):
             self._throttle()
             try:
-                response = requests.get(url, params=params, timeout=self.timeout)
+                # Cap per-request wait so analyze stays under Render's gateway budget.
+                response = requests.get(url, params=params, timeout=min(self.timeout, 12))
             except requests.RequestException as exc:
                 last_exc = exc
                 if attempt < retries:
-                    time.sleep(0.8 * (attempt + 1))
+                    time.sleep(0.4 * (attempt + 1))
                     continue
                 raise WeatherProviderError(f"Weather request failed: {exc}") from exc
 
             if response.status_code == 429:
-                self._mark_rate_limited(3.0 + 1.5 * attempt)
+                self._mark_rate_limited(2.0)
                 if attempt < retries:
-                    # Keep sleeps short — long cool-downs make Render return 502
-                    # for the whole analyze before any forecast is attached.
-                    time.sleep(1.5 + 1.25 * attempt)
+                    time.sleep(0.8 + 0.6 * attempt)
                     continue
                 raise WeatherProviderError("Weather API rate limit exceeded.", status=429)
             if response.status_code >= 400:
@@ -264,27 +265,12 @@ class WeatherService:
             try:
                 self._fetch_forecast_days_batch(chunk)
             except WeatherProviderError as exc:
-                logger.warning(
-                    "Weather batch prefetch failed (%s); brief cooldown then one cell",
-                    exc,
-                )
-                # One recovery cell only — more sequential calls worsen 429s and
-                # risk gateway 502s on free Render. Checkpoint scoring reuses
-                # nearby cache when exact cells are still cold.
-                self._mark_rate_limited(3.0)
-                time.sleep(1.5)
-                for lat, lon in chunk[:1]:
-                    if self._cache_get(self._cache_key(lat, lon, "fd7", "fd7")) is not None:
-                        continue
-                    try:
-                        self._fetch_forecast_days(lat, lon)
-                    except WeatherProviderError as cell_exc:
-                        logger.warning(
-                            "Weather prefetch failed for %s,%s: %s",
-                            lat,
-                            lon,
-                            cell_exc,
-                        )
+                # Stop prefetch immediately on provider pressure. Checkpoint
+                # scoring will reuse any warm nearby cache; unfinished cells
+                # become Unavailable instead of hanging the whole analyze.
+                logger.warning("Weather batch prefetch failed (%s); skipping remaining cells", exc)
+                self._mark_rate_limited(2.0)
+                return
 
     def weather_at(
         self,
