@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestWithRetry } from './client'
+import { apiRequest, apiRequestWithRetry, ensureApiAwake } from './client'
 import type {
   AnalyzedRoute,
   AnalyzeRoutesRequest,
@@ -8,9 +8,10 @@ import type {
 
 /** Wake a cold Render instance before the heavy analyze call. */
 export async function checkHealth(options?: { signal?: AbortSignal }): Promise<HealthResponse> {
+  await ensureApiAwake(options?.signal)
   return apiRequestWithRetry<HealthResponse>('/api/health/', {
     signal: options?.signal,
-    timeoutMs: 45_000,
+    timeoutMs: 30_000,
   }, { retries: 2, retryDelayMs: 800 })
 }
 
@@ -18,9 +19,9 @@ export async function analyzeRoutes(
   payload: AnalyzeRoutesRequest,
   options?: { signal?: AbortSignal },
 ): Promise<AnalyzeRoutesResponse> {
-  // Warm the API (free-tier cold start) so the analyze POST is less likely to drop.
+  // Warm the free-tier API before the heavy POST (avoids empty 502 / fake CORS).
   try {
-    await checkHealth({ signal: options?.signal })
+    await ensureApiAwake(options?.signal)
   } catch {
     // Analyze retry loop below still covers a cold/offline API.
   }
@@ -30,7 +31,7 @@ export async function analyzeRoutes(
     body: JSON.stringify(payload),
     signal: options?.signal,
     timeoutMs: 150_000,
-  }, { retries: 2, retryDelayMs: 1500 })
+  }, { retries: 3, retryDelayMs: 2000 })
 }
 
 export function getRoute(routeId: string): Promise<AnalyzedRoute> {

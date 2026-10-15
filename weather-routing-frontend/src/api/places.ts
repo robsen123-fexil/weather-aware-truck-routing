@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestWithRetry } from './client'
+import { apiRequest, apiRequestWithRetry, ensureApiAwake } from './client'
 
 export interface PlaceSuggestion {
   label: string
@@ -16,7 +16,7 @@ export interface PlaceSuggestResponse {
   suggestions: PlaceSuggestion[]
 }
 
-export function suggestPlaces(
+export async function suggestPlaces(
   query: string,
   limit = 6,
 ): Promise<PlaceSuggestResponse> {
@@ -24,9 +24,14 @@ export function suggestPlaces(
     q: query,
     limit: String(limit),
   })
+  try {
+    await ensureApiAwake()
+  } catch {
+    /* suggest retry still handles cold start */
+  }
   return apiRequestWithRetry<PlaceSuggestResponse>(`/api/places/suggest/?${qs}`, {
-    timeoutMs: 20_000,
-  }, { retries: 1, retryDelayMs: 700 })
+    timeoutMs: 25_000,
+  }, { retries: 3, retryDelayMs: 1000 })
 }
 
 export interface ReverseGeocodeResponse {
@@ -41,7 +46,7 @@ export interface ReverseGeocodeResponse {
   source?: string
 }
 
-export function reverseGeocode(
+export async function reverseGeocode(
   lat: number,
   lon: number,
 ): Promise<ReverseGeocodeResponse> {

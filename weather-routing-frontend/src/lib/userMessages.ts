@@ -6,9 +6,15 @@ export function userFacingError(err: unknown): string {
     if (err.code === 'timeout' || err.status === 504) {
       return 'Route analysis is taking longer than usual. Please wait a moment and try again.'
     }
-    if (err.status === 0 || err.code === 'network_error') {
+    if (
+      err.code === 'gateway_error'
+      || err.code === 'network_error'
+      || err.status === 0
+      || err.status === 502
+      || err.status === 503
+    ) {
       return (
-        'The planning service is waking up or briefly unavailable. '
+        'The planning service is starting up (free hosting can take up to a minute). '
         + 'Wait a few seconds and try again — this is usually not your internet connection.'
       )
     }

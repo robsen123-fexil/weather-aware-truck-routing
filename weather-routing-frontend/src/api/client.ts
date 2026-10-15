@@ -79,7 +79,6 @@ export async function apiRequest<T>(
       throw new DOMException('The operation was aborted.', 'AbortError')
     }
     if (isAbortError(err)) {
-      // Our timer fired and the caller did not cancel — treat as timeout.
       if (timeoutMs != null && timeoutMs > 0 && !externalSignal?.aborted) {
         throw new ApiError(
           'The planning service took too long to respond. Please try again.',
@@ -91,6 +90,7 @@ export async function apiRequest<T>(
         ? err
         : new DOMException('The operation was aborted.', 'AbortError')
     }
+    // Browsers surface Render 502 (no CORS headers) as a TypeError / Failed to fetch.
     throw new ApiError(
       'Network request failed',
       0,
@@ -107,6 +107,14 @@ export async function apiRequest<T>(
     try {
       data = JSON.parse(text)
     } catch {
+      // Render gateway HTML / empty 502s are not JSON — treat as gateway outage.
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new ApiError(
+          'Planning service gateway error',
+          response.status,
+          'gateway_error',
+        )
+      }
       if (import.meta.env.DEV) {
         console.warn('Non-JSON API response', text.slice(0, 200))
       }
@@ -119,6 +127,13 @@ export async function apiRequest<T>(
   }
 
   if (!response.ok) {
+    if (!text && (response.status === 502 || response.status === 503 || response.status === 504)) {
+      throw new ApiError(
+        'Planning service gateway error',
+        response.status,
+        'gateway_error',
+      )
+    }
     const body = data as ApiErrorBody
     const raw =
       body?.error?.message
@@ -139,7 +154,9 @@ export async function apiRequest<T>(
 
 function isRetryable(err: unknown): boolean {
   if (!(err instanceof ApiError)) return false
-  if (err.code === 'network_error' || err.code === 'timeout') return true
+  if (err.code === 'network_error' || err.code === 'timeout' || err.code === 'gateway_error') {
+    return true
+  }
   return err.status === 502 || err.status === 503 || err.status === 504 || err.status === 429
 }
 
@@ -172,4 +189,42 @@ export async function apiRequestWithRetry<T>(
   }
 
   throw lastError
+}
+
+let wakePromise: Promise<void> | null = null
+
+/**
+ * Ping health until the free Render instance is up.
+ * Safe to call repeatedly — concurrent callers share one wake cycle.
+ */
+export function ensureApiAwake(signal?: AbortSignal): Promise<void> {
+  if (wakePromise) return wakePromise
+
+  wakePromise = (async () => {
+    const retries = 6
+    let lastError: unknown
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError')
+      }
+      try {
+        await apiRequest('/api/health/', { signal, timeoutMs: 20_000 })
+        return
+      } catch (err) {
+        lastError = err
+        if (isAbortError(err) || signal?.aborted) throw err
+        if (!isRetryable(err) || attempt >= retries) break
+        // Free Render cold starts often need 30–60s.
+        await sleep(1500 + attempt * 1200)
+      }
+    }
+    if (lastError) throw lastError
+  })().finally(() => {
+    // Allow a later wake if the instance spins down again.
+    window.setTimeout(() => {
+      wakePromise = null
+    }, 60_000)
+  })
+
+  return wakePromise
 }
