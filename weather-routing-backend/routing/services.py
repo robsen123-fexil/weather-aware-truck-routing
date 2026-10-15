@@ -261,8 +261,8 @@ class RoutingService:
         """
         Place autocomplete suggestions (cities/regions/countries).
 
-        Uses Nominatim (no API key). Returns an empty list on failure so the
-        UI can keep typing without hard errors.
+        Prefers OpenRouteService when keyed (avoids Nominatim 429s). Returns an
+        empty list on failure so the UI can keep typing without hard errors.
         """
         query = (query or "").strip()
         if len(query) < 1:
@@ -274,6 +274,61 @@ class RoutingService:
         if cached is not None:
             return [dict(item) for item in cached]
 
+        suggestions: list[dict[str, Any]] = []
+        if self.api_key:
+            try:
+                suggestions = self._suggest_ors(query, limit=limit)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ORS place suggest failed (%s); trying Nominatim", exc)
+
+        if not suggestions:
+            suggestions = self._suggest_nominatim(query, limit=limit)
+
+        if suggestions:
+            _cache_put(_SUGGEST_CACHE, cache_key, suggestions)
+        return [dict(item) for item in suggestions]
+
+    def _suggest_ors(self, query: str, *, limit: int) -> list[dict[str, Any]]:
+        response = requests.get(
+            f"{self.base}/geocode/autocomplete",
+            params={"text": query, "size": limit},
+            headers={"Authorization": self._auth_header()},
+            timeout=min(self.timeout, 12),
+        )
+        if response.status_code == 429:
+            logger.warning("Place suggest rate-limited by ORS")
+            return []
+        if response.status_code >= 400:
+            logger.warning("ORS place suggest HTTP %s", response.status_code)
+            return []
+
+        suggestions: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for feature in response.json().get("features") or []:
+            props = feature.get("properties") or {}
+            geometry = feature.get("geometry") or {}
+            coords = geometry.get("coordinates") or []
+            if len(coords) < 2:
+                continue
+            label = (props.get("label") or props.get("name") or "").strip()
+            if not label or label.lower() in seen:
+                continue
+            seen.add(label.lower())
+            suggestions.append(
+                {
+                    "label": label,
+                    "lat": float(coords[1]),
+                    "lon": float(coords[0]),
+                    "type": props.get("layer") or props.get("type") or "place",
+                    "country": props.get("country"),
+                    "state": props.get("region") or props.get("state"),
+                    "city": props.get("locality") or props.get("county"),
+                    "source": "openrouteservice",
+                }
+            )
+        return suggestions
+
+    def _suggest_nominatim(self, query: str, *, limit: int) -> list[dict[str, Any]]:
         try:
             response = requests.get(
                 "https://nominatim.openstreetmap.org/search",
@@ -320,8 +375,7 @@ class RoutingService:
                     "source": "nominatim",
                 }
             )
-        _cache_put(_SUGGEST_CACHE, cache_key, suggestions)
-        return [dict(item) for item in suggestions]
+        return suggestions
 
     @staticmethod
     def _approx_distance_m(origin: dict[str, Any], destination: dict[str, Any]) -> float:
