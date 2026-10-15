@@ -1,18 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { reverseGeocode, type PlaceSuggestion } from '../api/places'
+import { suggestPlaces, type PlaceSuggestion } from '../api/places'
 import type { AnalyzeRoutesRequest, CheckpointInterval } from '../types/routing'
 import { PlaceAutocomplete } from './PlaceAutocomplete'
 
 interface TripFormProps {
   loading: boolean
   onSubmit: (request: AnalyzeRoutesRequest) => void
-}
-
-interface DetectedLocation {
-  lat: number
-  lon: number
-  accuracyM: number | null
-  label: string
 }
 
 /** Exact current local time for datetime-local (user's timezone). */
@@ -25,25 +18,15 @@ function coordsString(lat: number, lon: number): string {
   return `${lat.toFixed(6)},${lon.toFixed(6)}`
 }
 
-const GEO_OPTIONS: PositionOptions = {
-  enableHighAccuracy: true,
-  timeout: 20_000,
-  maximumAge: 0,
-}
-
 export function TripForm({ loading, onSubmit }: TripFormProps) {
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
-  /** Saved lat/lon from autocomplete (or GPS) so analyze skips Nominatim geocode. */
+  /** Saved lat/lon from autocomplete so analyze skips Nominatim geocode. */
   const [originCoords, setOriginCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [departureLocal, setDepartureLocal] = useState(() => nowLocalInputValue())
   const [loadWeight, setLoadWeight] = useState(35000)
   const [interval, setIntervalMiles] = useState<CheckpointInterval>(25)
-  const [locationStatus, setLocationStatus] = useState<'idle' | 'locating' | 'ok' | 'denied' | 'error'>('idle')
-  const [detected, setDetected] = useState<DetectedLocation | null>(null)
-  const [usingGpsOrigin, setUsingGpsOrigin] = useState(false)
-  const [locationWarning, setLocationWarning] = useState<string | null>(null)
   const [departureLockedToNow, setDepartureLockedToNow] = useState(true)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -55,73 +38,7 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     return () => window.clearInterval(id)
   }, [departureLockedToNow])
 
-  const clearDetectedLocation = () => {
-    setDetected(null)
-    setUsingGpsOrigin(false)
-    setLocationWarning(null)
-    setLocationStatus('idle')
-    setOrigin('')
-    setOriginCoords(null)
-  }
-
-  const applyPosition = async (pos: GeolocationPosition) => {
-    const lat = pos.coords.latitude
-    const lon = pos.coords.longitude
-    const accuracyM = Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null
-
-    let label = coordsString(lat, lon)
-    try {
-      const place = await reverseGeocode(lat, lon)
-      label = place.label || place.full_label || label
-    } catch {
-      /* keep coordinate fallback */
-    }
-
-    setDetected({ lat, lon, accuracyM, label })
-    setUsingGpsOrigin(true)
-    setOrigin(label)
-    setOriginCoords({ lat, lon })
-    setLocationStatus('ok')
-
-    // Browser often returns wrong country via IP/network location (± hundreds of meters+).
-    if (accuracyM != null && accuracyM >= 200) {
-      setLocationWarning(
-        'This looks like a rough network location from your browser/Windows — it is often wrong. '
-        + 'If this is not where you are, click “Not my location” and type your real city.',
-      )
-    } else {
-      setLocationWarning(
-        'If this place is wrong, your device GPS/Windows Location is reporting another country. '
-        + 'Click “Not my location” and type your city instead.',
-      )
-    }
-  }
-
-  const locate = () => {
-    if (!navigator.geolocation) {
-      setLocationStatus('error')
-      setLocationWarning('Geolocation is not available in this browser.')
-      return
-    }
-    setLocationStatus('locating')
-    setLocationWarning(null)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        void applyPosition(pos)
-      },
-      (err) => {
-        setLocationStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'error')
-        setLocationWarning(null)
-      },
-      GEO_OPTIONS,
-    )
-  }
-
   const handleOriginChange = (value: string) => {
-    setUsingGpsOrigin(false)
-    setDetected(null)
-    setLocationWarning(null)
-    setLocationStatus('idle')
     setOrigin(value)
     setOriginCoords(null)
   }
@@ -132,10 +49,6 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
   }
 
   const handleOriginSelect = (place: PlaceSuggestion) => {
-    setUsingGpsOrigin(false)
-    setDetected(null)
-    setLocationWarning(null)
-    setLocationStatus('idle')
     setOrigin(place.label)
     setOriginCoords({ lat: place.lat, lon: place.lon })
   }
@@ -145,7 +58,30 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
     setDestinationCoords({ lat: place.lat, lon: place.lon })
   }
 
-  const handleSubmit = (e: FormEvent) => {
+  const resolvePlaceCoords = async (
+    text: string,
+    existing: { lat: number; lon: number } | null,
+  ): Promise<{ lat: number; lon: number } | null> => {
+    if (existing) return existing
+    const trimmed = text.trim()
+    if (!trimmed) return null
+    if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(trimmed)) {
+      const [a, b] = trimmed.split(',').map((p) => Number(p.trim()))
+      if (Number.isFinite(a) && Number.isFinite(b)) return { lat: a!, lon: b! }
+    }
+    try {
+      const res = await suggestPlaces(trimmed, 1)
+      const hit = res.suggestions[0]
+      if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+        return { lat: hit.lat, lon: hit.lon }
+      }
+    } catch {
+      /* analyze will still attempt server-side geocode */
+    }
+    return null
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (loading) return
     setFormError(null)
@@ -170,18 +106,20 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
       return
     }
 
-    // Prefer lat,lon so the backend skips Nominatim (avoids 429 after autocomplete).
-    let originValue = origin.trim()
-    if (originCoords) {
-      originValue = coordsString(originCoords.lat, originCoords.lon)
-    } else if (usingGpsOrigin && detected) {
-      originValue = coordsString(detected.lat, detected.lon)
-    }
+    // Prefer lat,lon so the backend skips geocode (faster + avoids rate limits).
+    const [resolvedOrigin, resolvedDest] = await Promise.all([
+      resolvePlaceCoords(origin, originCoords),
+      resolvePlaceCoords(destination, destinationCoords),
+    ])
+    if (resolvedOrigin) setOriginCoords(resolvedOrigin)
+    if (resolvedDest) setDestinationCoords(resolvedDest)
 
-    let destinationValue = destination.trim()
-    if (destinationCoords) {
-      destinationValue = coordsString(destinationCoords.lat, destinationCoords.lon)
-    }
+    const originValue = resolvedOrigin
+      ? coordsString(resolvedOrigin.lat, resolvedOrigin.lon)
+      : origin.trim()
+    const destinationValue = resolvedDest
+      ? coordsString(resolvedDest.lat, resolvedDest.lon)
+      : destination.trim()
 
     onSubmit({
       origin: originValue,
@@ -195,57 +133,16 @@ export function TripForm({ loading, onSubmit }: TripFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <PlaceAutocomplete
-          id="origin"
-          label="Origin"
-          value={origin}
-          onChange={handleOriginChange}
-          onSelectPlace={handleOriginSelect}
-          required
-          disabled={loading}
-          placeholder="Type your city (e.g. Riyadh, Cairo, Istanbul)…"
-          suppressSuggest={usingGpsOrigin}
-        />
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={locate}
-            disabled={loading || locationStatus === 'locating'}
-            className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            {locationStatus === 'locating' ? 'Locating…' : 'Use my location'}
-          </button>
-          {usingGpsOrigin && (
-            <button
-              type="button"
-              onClick={clearDetectedLocation}
-              disabled={loading}
-              className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
-            >
-              Not my location
-            </button>
-          )}
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            {locationStatus === 'idle' && 'Tip: typing your city is more reliable than GPS on desktop'}
-            {locationStatus === 'ok' && usingGpsOrigin && 'Detected by browser GPS / Windows Location'}
-            {locationStatus === 'denied' && 'Location permission denied — type your city instead'}
-            {locationStatus === 'error' && 'Could not read GPS — type your city instead'}
-            {locationStatus === 'locating' && 'Asking browser for location…'}
-          </span>
-        </div>
-        {locationWarning && (
-          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-            {locationWarning}
-          </p>
-        )}
-        {usingGpsOrigin && detected && (
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Using your detected location
-            {detected.accuracyM != null ? ` (±${Math.round(detected.accuracyM)} m)` : ''}.
-          </p>
-        )}
-      </div>
+      <PlaceAutocomplete
+        id="origin"
+        label="Origin"
+        value={origin}
+        onChange={handleOriginChange}
+        onSelectPlace={handleOriginSelect}
+        required
+        disabled={loading}
+        placeholder="Type your city (e.g. Riyadh, Cairo, Istanbul)…"
+      />
 
       <PlaceAutocomplete
         id="destination"

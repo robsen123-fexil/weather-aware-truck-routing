@@ -55,13 +55,41 @@ class TripPlannerService:
                 f"routing_alternatives:{len(raw_routes)}"
             )
 
+        # Build checkpoints first, then prefetch weather in parallel so analyze
+        # does not run dozens of sequential Open-Meteo calls (timeout risk).
+        prepared: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        weather_points: list[tuple[float, float]] = []
         for raw in raw_routes:
+            checkpoints = generate_checkpoints(
+                raw["geometry"]["coordinates"],
+                interval_miles=float(interval),
+                total_distance_m=raw["distance_m"],
+            )
+            checkpoints = attach_etas(
+                checkpoints,
+                departure=departure,
+                duration_seconds=raw["duration_seconds"],
+                total_distance_m=raw["distance_m"],
+            )
+            prepared.append((raw, checkpoints))
+            for cp in checkpoints:
+                weather_points.append(
+                    (cp["coordinates"]["lat"], cp["coordinates"]["lon"])
+                )
+
+        try:
+            self.weather.prefetch_locations(weather_points)
+        except Exception:  # noqa: BLE001
+            logger.exception("Weather prefetch failed; continuing with on-demand fetches")
+
+        for raw, checkpoints in prepared:
             try:
                 route = self._analyze_single_route(
                     raw,
                     departure=departure,
                     load_weight_lb=load_weight_lb,
                     interval_miles=interval,
+                    checkpoints=checkpoints,
                 )
                 analyzed.append(route)
                 self.store.put(route["id"], route)
@@ -145,19 +173,21 @@ class TripPlannerService:
         departure: datetime,
         load_weight_lb: float,
         interval_miles: int,
+        checkpoints: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        coords = raw["geometry"]["coordinates"]
-        checkpoints = generate_checkpoints(
-            coords,
-            interval_miles=float(interval_miles),
-            total_distance_m=raw["distance_m"],
-        )
-        checkpoints = attach_etas(
-            checkpoints,
-            departure=departure,
-            duration_seconds=raw["duration_seconds"],
-            total_distance_m=raw["distance_m"],
-        )
+        if checkpoints is None:
+            coords = raw["geometry"]["coordinates"]
+            checkpoints = generate_checkpoints(
+                coords,
+                interval_miles=float(interval_miles),
+                total_distance_m=raw["distance_m"],
+            )
+            checkpoints = attach_etas(
+                checkpoints,
+                departure=departure,
+                duration_seconds=raw["duration_seconds"],
+                total_distance_m=raw["distance_m"],
+            )
 
         enriched_cps: list[dict[str, Any]] = []
         for cp in checkpoints:

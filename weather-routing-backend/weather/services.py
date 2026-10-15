@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 
 import requests
 from django.conf import settings
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Keep corridor HTTP volume low on the free Open-Meteo endpoint.
 _MAX_CORRIDOR_POINTS = 8
+_PREFETCH_WORKERS = 6
 
 # Process-wide cache so analyze + corridor on the same worker share fetches.
 _FORECAST_CACHE: dict[str, dict[str, Any]] = {}
@@ -149,9 +151,40 @@ class WeatherService:
             data = data[0] if data else {}
         assert isinstance(data, dict)
         self._cache_set(key, data)
-        # Tiny pause after a real network fetch to stay under free-tier bursts.
-        time.sleep(0.05)
         return data
+
+    def prefetch_locations(self, points: Iterable[tuple[float, float]]) -> None:
+        """Warm the forecast cache for unique ~1km cells before checkpoint scoring."""
+        unique: list[tuple[float, float]] = []
+        seen: set[tuple[float, float]] = set()
+        for lat, lon in points:
+            key = (round(float(lat), 3), round(float(lon), 3))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(key)
+
+        if not unique:
+            return
+
+        def _warm(cell: tuple[float, float]) -> None:
+            lat, lon = cell
+            cache_key = self._cache_key(lat, lon, "fd7", "fd7")
+            if self._cache_get(cache_key) is not None:
+                return
+            try:
+                self._fetch_forecast_days(lat, lon)
+            except Exception:  # noqa: BLE001 — keep analyze moving
+                logger.warning("Weather prefetch failed for %s,%s", lat, lon)
+
+        workers = min(_PREFETCH_WORKERS, len(unique))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_warm, cell) for cell in unique]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Unexpected weather prefetch error")
 
     def weather_at(
         self,

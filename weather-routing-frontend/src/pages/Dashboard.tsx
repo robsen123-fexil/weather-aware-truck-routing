@@ -40,7 +40,7 @@ export function Dashboard() {
   return (
     <div className="theme-surface min-h-screen bg-[radial-gradient(ellipse_at_top,_#e8eef7_0%,_#f1f5f9_45%,_#e2e8f0_100%)] dark:bg-[radial-gradient(ellipse_at_top,_#1e293b_0%,_#0f172a_45%,_#020617_100%)]">
       <header className="theme-surface border-b border-slate-200/80 bg-white/80 backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/80">
-        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-[1320px] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700 dark:text-sky-400">
               Trip planner
@@ -56,7 +56,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1440px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(280px,340px)_1fr]">
+      <main className="mx-auto grid w-full max-w-[1320px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(280px,340px)_1fr] lg:px-8">
         <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-none">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

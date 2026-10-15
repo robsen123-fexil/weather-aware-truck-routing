@@ -1,4 +1,4 @@
-import { apiRequest } from './client'
+import { apiRequest, apiRequestWithRetry } from './client'
 
 export interface PlaceSuggestion {
   label: string
@@ -24,7 +24,9 @@ export function suggestPlaces(
     q: query,
     limit: String(limit),
   })
-  return apiRequest<PlaceSuggestResponse>(`/api/places/suggest/?${qs}`)
+  return apiRequestWithRetry<PlaceSuggestResponse>(`/api/places/suggest/?${qs}`, {
+    timeoutMs: 20_000,
+  }, { retries: 1, retryDelayMs: 700 })
 }
 
 export interface ReverseGeocodeResponse {

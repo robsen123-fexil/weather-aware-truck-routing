@@ -3,8 +3,14 @@ import { ApiError } from '../api/client'
 /** Map API and network failures to driver-friendly copy (log details separately). */
 export function userFacingError(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.code === 'timeout' || err.status === 504) {
+      return 'Route analysis is taking longer than usual. Please wait a moment and try again.'
+    }
     if (err.status === 0 || err.code === 'network_error') {
-      return 'Unable to analyze this trip right now. Check your connection and try again.'
+      return (
+        'The planning service is waking up or briefly unavailable. '
+        + 'Wait a few seconds and try again — this is usually not your internet connection.'
+      )
     }
     if (err.status === 400 || err.code === 'validation_error') {
       return 'Please check the origin, destination, and departure time, then try again.'
