@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 _GEOCODE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SUGGEST_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _CACHE_MAX = 256
+# Stop hunting for extra alternatives after this many seconds (once one route exists).
+_ROUTE_SEARCH_BUDGET_S = 22.0
 _GEOCODE_TTL_S = 15 * 60
 _SUGGEST_TTL_S = 5 * 60
 
@@ -592,8 +594,25 @@ class RoutingService:
         last_error: Exception | None = None
         batches: list[list[dict[str, Any]]] = []
 
+        started = time.monotonic()
+
         def merged_count() -> int:
             return len(self._merge_distinct_routes(batches, max_alternatives=max_alternatives))
+
+        def need_more() -> bool:
+            """Keep searching for alternatives only while within the time budget.
+
+            Once at least one REAL provider route is in hand and the budget is spent,
+            stop adding alternatives so the request finishes before the host's gateway
+            timeout (the planner already warns when fewer than 3 routes are returned).
+            """
+            n = merged_count()
+            if n >= max_alternatives:
+                return False
+            if n >= 1 and time.monotonic() - started > _ROUTE_SEARCH_BUDGET_S:
+                logger.info("Route alternative search budget spent with %s route(s)", n)
+                return False
+            return True
 
         body_base: dict[str, Any] = {
             "coordinates": [
@@ -625,7 +644,7 @@ class RoutingService:
                 logger.warning("OSRM routing failed: %s", exc.message)
 
         # 2) ORS with alternative_routes (up to 2 alts → 3 routes on short trips)
-        if ors_alts_ok and merged_count() < max_alternatives:
+        if ors_alts_ok and need_more():
             alt_count = max(0, max_alternatives - 1)
             body_with_alts = {
                 **body_base,
@@ -650,12 +669,12 @@ class RoutingService:
                     )
 
         # 3) ORS preference variants (often yields different geometries)
-        if merged_count() < max_alternatives:
+        if need_more():
             for preference in ("recommended", "fastest", "shortest"):
-                if merged_count() >= max_alternatives:
+                if not need_more():
                     break
                 for profile in profiles:
-                    if merged_count() >= max_alternatives:
+                    if not need_more():
                         break
                     body = {**body_base, "preference": preference}
                     try:
@@ -675,9 +694,9 @@ class RoutingService:
                             break
 
         # 4) Via-point detours to force remaining alternatives
-        if merged_count() < max_alternatives:
+        if need_more():
             for side in (1.0, -1.0, 1.4, -1.4):
-                if merged_count() >= max_alternatives:
+                if not need_more():
                     break
                 via = self._offset_via(origin, destination, side=side)
                 try:
