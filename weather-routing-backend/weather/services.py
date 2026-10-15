@@ -34,6 +34,14 @@ _HTTP_LOCK = threading.Lock()
 _LAST_HTTP_AT = 0.0
 _MIN_HTTP_GAP_S = 0.55
 _RATE_LIMIT_COOLDOWN_S = 0.0
+# After Open-Meteo answers 429, skip it for this long and use Met.no directly.
+_OPEN_METEO_SKIP_S = 120.0
+_OPEN_METEO_SKIP_UNTIL = 0.0
+
+
+def _skip_open_meteo(seconds: float) -> None:
+    global _OPEN_METEO_SKIP_UNTIL
+    _OPEN_METEO_SKIP_UNTIL = max(_OPEN_METEO_SKIP_UNTIL, time.monotonic() + seconds)
 
 
 def _grid_coord(value: float) -> float:
@@ -123,6 +131,10 @@ class WeatherService:
     def _get_json(self, params: dict[str, Any], *, retries: int = 2) -> dict[str, Any] | list[Any]:
         url = f"{self.base_url}/forecast"
         last_exc: Exception | None = None
+        if time.monotonic() < _OPEN_METEO_SKIP_UNTIL:
+            raise WeatherProviderError(
+                "Weather API rate limit exceeded (cooling down).", status=429
+            )
         for attempt in range(retries + 1):
             self._throttle()
             try:
@@ -144,10 +156,11 @@ class WeatherService:
                 raise WeatherProviderError(f"Weather request failed: {exc}") from exc
 
             if response.status_code == 429:
+                # Shared-IP rate limit (typical on free hosts) will not clear in a
+                # second: stop retrying and route straight to the Met.no fallback for
+                # a while instead of burning the request's time budget per cell.
                 self._mark_rate_limited(2.0)
-                if attempt < retries:
-                    time.sleep(0.8 + 0.6 * attempt)
-                    continue
+                _skip_open_meteo(_OPEN_METEO_SKIP_S)
                 raise WeatherProviderError("Weather API rate limit exceeded.", status=429)
             if response.status_code >= 400:
                 raise WeatherProviderError(
